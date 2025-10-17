@@ -11,32 +11,28 @@ import java.net.URI;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/devices") // Версионирование API
+@RequestMapping("/api/v1/devices")
 @RequiredArgsConstructor
 public class DeviceController {
 
     private final DeviceService deviceService;
 
     @GetMapping
-    public List<Device> getAllDevices() {
-        return deviceService.findAllDevices();
+    public List<Device> getAllDevicesForCurrentUser() {
+        return deviceService.findAllDevicesForCurrentUser();
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<Device> getDeviceById(@PathVariable Long id) {
-        return deviceService.findDeviceById(id)
-                .map(ResponseEntity::ok) // Если найдено, вернуть 200 OK с телом
-                .orElse(ResponseEntity.notFound().build()); // Иначе вернуть 404 Not Found
+        return deviceService.findDeviceByIdForCurrentUser(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
-    // Примечание: в реальном приложении userId должен браться из сессии/токена аутентифицированного пользователя
-    // Здесь для простоты мы ожидаем его в теле запроса.
-    // Пример POST-запроса на http://localhost:8080/api/v1/devices?userId=1
     @PostMapping
-    public ResponseEntity<Device> createDevice(@RequestBody Device device, @RequestParam Long userId) {
-        Device createdDevice = deviceService.createDevice(device, userId);
+    public ResponseEntity<Device> createDevice(@RequestBody Device device) {
+        Device createdDevice = deviceService.createDevice(device);
 
-        // Формируем URI для нового ресурса для ответа 201 Created
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")
                 .buildAndExpand(createdDevice.getId())

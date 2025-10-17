@@ -5,6 +5,7 @@ import dashboard.com.smart_iot_dashboard.service.DeviceDataService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -18,11 +19,19 @@ public class DeviceDataController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public DeviceData submitData(@PathVariable Long deviceId, @RequestBody DeviceData data) {
-        return deviceDataService.saveData(deviceId, data);
+        try {
+            return deviceDataService.saveData(deviceId, data);
+        } catch (RuntimeException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
     }
 
     @GetMapping
     public List<DeviceData> getDataForDevice(@PathVariable Long deviceId) {
-        return deviceDataService.findDataByDeviceId(deviceId);
+        try {
+            return deviceDataService.findDataByDeviceId(deviceId);
+        } catch (RuntimeException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
     }
 }

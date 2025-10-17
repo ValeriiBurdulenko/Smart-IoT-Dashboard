@@ -11,8 +11,8 @@ import java.util.List;
 public interface DeviceDataRepository extends JpaRepository<DeviceData, Long> {
 
     // Find all data for a specific device
-    List<DeviceData> findByDeviceId(Long deviceId);
+    List<DeviceData> findByDeviceIdAndDevice_User_Username(Long deviceId, String username);
 
-    // Find data for a device for a specific period of time
+    // Find data for a device for a specific period of time TODO
     List<DeviceData> findByDeviceIdAndTimestampBetween(Long deviceId, ZonedDateTime start, ZonedDateTime end);
 }
