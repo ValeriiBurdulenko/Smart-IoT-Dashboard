@@ -51,6 +51,7 @@ class DeviceServiceTest {
 
         Device device = new Device();
         device.setName("Test Device");
+        device.setExternalId("etwas");
 
         when(authentication.getName()).thenReturn(username);
         when(userRepository.findByUsername(username)).thenReturn(Optional.of(user));
@@ -71,32 +72,32 @@ class DeviceServiceTest {
     void deleteDevice_shouldDelete_whenDeviceBelongsToUser() {
         // Arrange
         String username = "owner";
-        long deviceId = 1L;
+        String deviceId = "1L";
         Device device = new Device();
-        device.setId(deviceId);
+        device.setExternalId(deviceId);
 
         when(authentication.getName()).thenReturn(username);
-        when(deviceRepository.findByIdAndUser_Username(deviceId, username)).thenReturn(Optional.of(device));
+        when(deviceRepository.findByExternalIdAndUser_Username(deviceId, username)).thenReturn(Optional.of(device));
 
         // Act
-        boolean result = deviceService.deleteDevice(deviceId);
+        boolean result = deviceService.deleteDeviceByExternalId(deviceId);
 
         // Assert
         assertThat(result).isTrue();
-        verify(deviceRepository, times(1)).deleteById(deviceId);
+        verify(deviceRepository, times(1)).deleteById(device.getId());
     }
 
     @Test
     void deleteDevice_shouldNotDelete_whenDeviceNotBelongsToUser() {
         // Arrange
         String username = "owner";
-        long deviceId = 1L;
+        String deviceId = "1L";
 
         when(authentication.getName()).thenReturn(username);
-        when(deviceRepository.findByIdAndUser_Username(deviceId, username)).thenReturn(Optional.empty());
+        when(deviceRepository.findByExternalIdAndUser_Username(deviceId, username)).thenReturn(Optional.empty());
 
         // Act
-        boolean result = deviceService.deleteDevice(deviceId);
+        boolean result = deviceService.deleteDeviceByExternalId(deviceId);
 
         // Assert
         assertThat(result).isFalse();

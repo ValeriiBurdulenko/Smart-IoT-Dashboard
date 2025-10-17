@@ -23,5 +23,7 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     // Method for searching devices by status
     List<Device> findByStatus(String status);
 
-    String user(User user);
+    Optional<Device> findByExternalIdAndUser_Username(String externalId, String username);
+
+    default boolean existsByExternalId(String externalId) { return false;}
 }

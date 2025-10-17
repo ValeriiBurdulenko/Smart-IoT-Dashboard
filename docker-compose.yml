@@ -19,6 +19,7 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      # 👇 Не забудьте указать IP вашего ноутбука, если работаете с двух машин
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -30,26 +31,3 @@ services:
     ports:
       - "1883:1883" # Standard MQTT port
       - "9001:9001" # Port for WebSocket (optional)
-
-  kafka-connect:
-    image: confluentinc/cp-kafka-connect:7.5.0
-    container_name: kafka-connect
-    depends_on:
-      - kafka
-    ports:
-      - "8083:8083" # REST API for connector management
-    environment:
-      CONNECT_BOOTSTRAP_SERVERS: 'kafka:29092'
-      CONNECT_REST_ADVERTISED_HOST_NAME: localhost
-      CONNECT_REST_PORT: 8083
-      CONNECT_GROUP_ID: compose-connect-group
-      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
-      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
-      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
-      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
-      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      # Installing the plugin for MQTT
-      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
-
-# To install the MQTT plugin in Kafka Connect, run the following command in the terminal:
-# docker-compose exec kafka-connect confluent-hub install confluentinc/kafka-connect-mqtt:latest

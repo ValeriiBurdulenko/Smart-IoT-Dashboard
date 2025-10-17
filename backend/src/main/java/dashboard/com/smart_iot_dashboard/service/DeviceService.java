@@ -30,8 +30,8 @@ public class DeviceService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<Device> findDeviceByIdForCurrentUser(Long id) {
-        return deviceRepository.findByIdAndUser_Username(id, getCurrentUsername());
+    public Optional<Device> findDeviceByExternalIdForCurrentUser(String externalId) {
+        return deviceRepository.findByExternalIdAndUser_Username(externalId, getCurrentUsername());
     }
 
     @Transactional
@@ -40,13 +40,22 @@ public class DeviceService {
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
         device.setUser(currentUser);
+
+        if (device.getExternalId() == null || device.getExternalId().isBlank()) {
+            throw new IllegalArgumentException("External ID must not be empty");
+        }
+        if (deviceRepository.existsByExternalId(device.getExternalId())) {
+            throw new IllegalArgumentException("Device with external ID " + device.getExternalId() + " already exists.");
+        }
+
         return deviceRepository.save(device);
     }
 
     @Transactional
-    public Optional<Device> updateDevice(Long id, Device deviceDetails) {
-        return deviceRepository.findByIdAndUser_Username(id, getCurrentUsername())
+    public Optional<Device> updateDeviceByExternalId(String externalId, Device deviceDetails) {
+        return deviceRepository.findByExternalIdAndUser_Username(externalId, getCurrentUsername())
                 .map(existingDevice -> {
+                    // Обновляем только те поля, которые можно менять
                     existingDevice.setName(deviceDetails.getName());
                     existingDevice.setLocation(deviceDetails.getLocation());
                     existingDevice.setStatus(deviceDetails.getStatus());
@@ -55,10 +64,10 @@ public class DeviceService {
     }
 
     @Transactional
-    public boolean deleteDevice(Long id) {
-        return deviceRepository.findByIdAndUser_Username(id, getCurrentUsername())
+    public boolean deleteDeviceByExternalId(String externalId) {
+        return deviceRepository.findByExternalIdAndUser_Username(externalId, getCurrentUsername())
                 .map(device -> {
-                    deviceRepository.deleteById(id);
+                    deviceRepository.deleteById(device.getId());
                     return true;
                 }).orElse(false);
     }

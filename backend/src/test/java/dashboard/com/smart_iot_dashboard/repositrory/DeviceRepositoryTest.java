@@ -42,18 +42,21 @@ class DeviceRepositoryTest {
         entityManager.persist(user2);
 
         device1 = new Device();
+        device1.setExternalId("sensor-abc-1");
         device1.setName("User1's Device");
         device1.setUser(user1);
         device1.setStatus("ACTIVE");
         entityManager.persist(device1);
 
         Device device2 = new Device();
+        device2.setExternalId("sensor-abc-2");
         device2.setName("Another User1's Device");
         device2.setUser(user1);
         device2.setStatus("INACTIVE");
         entityManager.persist(device2);
 
         Device device3 = new Device();
+        device3.setExternalId("sensor-abc-3");
         device3.setName("User2's Device");
         device3.setUser(user2);
         device3.setStatus("ACTIVE");
@@ -84,5 +87,13 @@ class DeviceRepositoryTest {
         Optional<Device> foundDevice = deviceRepository.findByIdAndUser_Username(device1.getId(), "user2");
 
         assertThat(foundDevice).isNotPresent();
+    }
+
+    @Test
+    void findByExternalIdAndUser_Username_shouldReturnDevice() {
+        Optional<Device> foundDevice = deviceRepository.findByExternalIdAndUser_Username("sensor-abc-1", "user1");
+
+        assertThat(foundDevice).isPresent();
+        assertThat(foundDevice.get().getExternalId()).isEqualTo("sensor-abc-1");
     }
 }

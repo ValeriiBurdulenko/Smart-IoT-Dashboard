@@ -16,6 +16,9 @@ public class Device {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "external_id", unique = true, nullable = false)
+    private String externalId;
+
     @Column(name = "name", nullable = false)
     private String name;
 
