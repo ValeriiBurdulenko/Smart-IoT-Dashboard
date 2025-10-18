@@ -26,4 +26,6 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     Optional<Device> findByExternalIdAndUser_Username(String externalId, String username);
 
     default boolean existsByExternalId(String externalId) { return false;}
+
+    Optional<Device> findByExternalId(String externalId);
 }
