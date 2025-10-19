@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timezone
 
 # --- Settings ---
-MQTT_BROKER_HOST = "localhost"
+MQTT_BROKER_HOST = "IP"
 MQTT_BROKER_PORT = 1883
 DEVICE_ID = f"sensor-{str(uuid.uuid4())[:8]}"
 
@@ -16,14 +16,17 @@ COMMAND_TOPIC = f"devices/{DEVICE_ID}/commands"
 
 PUBLISH_INTERVAL = 10  # Initial data transmission interval (in seconds)
 
+
 def on_connect(client, userdata, flags, rc):
     """Callback that is called when connecting to the broker."""
     if rc == 0:
-        print(f"✅ The {DEVICE_ID} device has been successfully connected to the MQTT broker.")
+        print(
+            f"✅ The {DEVICE_ID} device has been successfully connected to the MQTT broker.")
         client.subscribe(COMMAND_TOPIC)
         print(f"👂 Subscribed to the topic of commands: {COMMAND_TOPIC}")
     else:
         print(f"❌ Connection error, code: {rc}")
+
 
 def on_message(client, userdata, msg):
     """A callback that is invoked when a message is received in a subscribed topic."""
@@ -35,9 +38,11 @@ def on_message(client, userdata, msg):
             new_interval = int(command.get("value", PUBLISH_INTERVAL))
             if new_interval > 0:
                 PUBLISH_INTERVAL = new_interval
-                print(f"⚙️ The data transmission interval has been changed to {PUBLISH_INTERVAL} seconds.")
+                print(
+                    f"⚙️ The data transmission interval has been changed to {PUBLISH_INTERVAL} seconds.")
     except (json.JSONDecodeError, ValueError) as e:
         print(f"⚠️ Unable to process command: {e}")
+
 
 def generate_telemetry():
     """Generates telemetry data with anomalies."""
@@ -58,13 +63,15 @@ def generate_telemetry():
         }
     }
 
+
 # --- Main code ---
 if __name__ == "__main__":
     client = mqtt.Client(client_id=DEVICE_ID)
     client.on_connect = on_connect
     client.on_message = on_message
 
-    print(f"🔌 Device {DEVICE_ID} is attempting to connect to {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}...")
+    print(
+        f"🔌 Device {DEVICE_ID} is attempting to connect to {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}...")
     client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
 
     # We start the message processing cycle in the background thread.
