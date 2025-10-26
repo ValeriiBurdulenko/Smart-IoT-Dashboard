@@ -1,7 +1,7 @@
 import paho.mqtt.client as mqtt
 import time
 
-MQTT_BROKER_HOST = "IP"  # Your Laptop's IP
+MQTT_BROKER_HOST = "192.168.178.23"  # Your Laptop's IP
 MQTT_BROKER_PORT = 1883
 CLIENT_ID = "simple_test_client_pc"
 

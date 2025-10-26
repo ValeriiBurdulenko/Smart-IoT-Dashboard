@@ -9,7 +9,7 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>dashboard.com</groupId>
-	<artifactId>smart_iot_dashboard</artifactId>
+	<artifactId>user-device-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>smart_iot_dashboard</name>
 	<description>Smart IoT Dashboard</description>
