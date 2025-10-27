@@ -37,7 +37,9 @@ services:
     restart: unless-stopped
 
   mosquitto:
-    image: eclipse-mosquitto:2
+    build:
+      context: ./mosquitto
+      dockerfile: DockerFile
     container_name: mosquitto
     ports:
       - "1883:1883"
@@ -46,8 +48,6 @@ services:
     volumes:
       # --- go-auth ---
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/config/go-auth.conf:/mosquitto/config/go-auth.conf:ro
-      - ./mosquitto/config/go-auth.so:/mosquitto/config/mosquitto-go-auth.so:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
       - ./certs:/mosquitto/certs:ro
