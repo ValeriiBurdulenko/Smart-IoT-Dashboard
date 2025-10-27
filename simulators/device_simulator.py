@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timezone
 
 # --- Settings ---
-MQTT_BROKER_HOST = "192.168.178.23"
+MQTT_BROKER_HOST = "IP"
 MQTT_BROKER_PORT = 1883
 DEVICE_ID = f"sensor-{str(uuid.uuid4())[:8]}"
 

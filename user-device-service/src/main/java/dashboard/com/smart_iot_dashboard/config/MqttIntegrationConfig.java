@@ -17,7 +17,7 @@ import org.springframework.messaging.MessageHandler;
 @Configuration
 public class MqttIntegrationConfig {
 
-    private static final String MQTT_BROKER_URL = "tcp://192.168.178.23:1883"; // Laptop IP
+    private static final String MQTT_BROKER_URL = "tcp://IP:1883"; // Laptop IP
     // Use ONE client ID for both inbound and outbound for testing
     // private static final String MQTT_CLIENT_ID_INBOUND = "spring-backend-listener";
     // private static final String MQTT_CLIENT_ID_OUTBOUND = "spring-backend-publisher";
