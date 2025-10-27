@@ -41,16 +41,16 @@ services:
     container_name: mosquitto
     ports:
       - "1883:1883"
-      # - "8883:8883" # When have TLS configuration
+      - "8883:8883" # When have TLS configuration
       # - "9001:9001" # WebSocket
     volumes:
       # --- go-auth ---
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/go-auth.conf:/mosquitto/config/go-auth.conf:ro
-      - ./mosquitto/mosquitto-go-auth.so:/mosquitto/config/mosquitto-go-auth.so:ro
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/config/go-auth.conf:/mosquitto/config/go-auth.conf:ro
+      - ./mosquitto/config/go-auth.so:/mosquitto/config/mosquitto-go-auth.so:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
-      # - ./certs:/mosquitto/certs:ro # When have TLS configuration
+      - ./certs:/mosquitto/certs:ro
     restart: unless-stopped
 
 volumes:
