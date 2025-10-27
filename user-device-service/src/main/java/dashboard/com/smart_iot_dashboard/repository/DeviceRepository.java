@@ -1,7 +1,6 @@
 package dashboard.com.smart_iot_dashboard.repository;
 
 import dashboard.com.smart_iot_dashboard.entity.Device;
-import dashboard.com.smart_iot_dashboard.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -11,21 +10,12 @@ import java.util.Optional;
 @Repository
 public interface DeviceRepository extends JpaRepository<Device, Long> {
 
-    // Method for finding all devices belonging to a specific user
-    List<Device> findByUser_Username(String username);
+    Optional<Device> findByDeviceId(String deviceId);
 
-    Optional<Device> findByIdAndUser_Username(Long id, String username);
+    boolean existsByDeviceId(String deviceId);
 
-    default boolean existsByIdAndUser_Username(Long id, String username) {
-        return false;
-    }
+    List<Device> findByUserId(String userId);
 
-    // Method for searching devices by status
-    List<Device> findByStatus(String status);
+    Optional<Device> findByDeviceIdAndUserId(String deviceId, String userId);
 
-    Optional<Device> findByExternalIdAndUser_Username(String externalId, String username);
-
-    default boolean existsByExternalId(String externalId) { return false;}
-
-    Optional<Device> findByExternalId(String externalId);
 }

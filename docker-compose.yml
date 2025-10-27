@@ -7,6 +7,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -19,15 +21,40 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      # 👇 Не забудьте указать IP вашего ноутбука, если работаете с двух машин
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://<IP>:9092,PLAINTEXT_INTERNAL://kafka:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass your_redis_password
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
 
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mosquitto
     ports:
-      - "1883:1883" # Standard MQTT port
-      - "9001:9001" # Port for WebSocket (optional)
+      - "1883:1883"
+      # - "8883:8883" # When have TLS configuration
+      # - "9001:9001" # WebSocket
+    volumes:
+      # --- go-auth ---
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/go-auth.conf:/mosquitto/config/go-auth.conf:ro
+      - ./mosquitto/mosquitto-go-auth.so:/mosquitto/config/mosquitto-go-auth.so:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+      # - ./certs:/mosquitto/certs:ro # When have TLS configuration
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:
+  # Don't forget that Kafka and Zookeeper also use volumes (usually implicitly).
