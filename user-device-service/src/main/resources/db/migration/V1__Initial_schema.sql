@@ -10,9 +10,9 @@ CREATE TABLE devices (
                          name VARCHAR(100),
                          location VARCHAR(255),
 
-                         CONSTRAINT uk_devices_device_id UNIQUE (device_id),
+                         CONSTRAINT uk_devices_device_id UNIQUE (device_id)
 
-                         INDEX idx_devices_user_id (user_id)
+                         -- INDEX idx_devices_user_id (user_id)
 );
 
 -- (Опционально) Индекс для быстрого поиска по device_id, если нужно
