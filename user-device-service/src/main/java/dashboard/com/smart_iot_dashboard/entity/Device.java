@@ -1,13 +1,13 @@
 package dashboard.com.smart_iot_dashboard.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
-
-import java.util.ArrayList;
-import java.util.List;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "devices")
 public class Device {
@@ -16,26 +16,27 @@ public class Device {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "external_id", unique = true, nullable = false)
-    private String externalId;
+    @Column(unique = true, nullable = false, length = 100)
+    private String deviceId;
 
-    @Column(name = "name", nullable = false)
+    @Column(nullable = false)
+    private String hashedDeviceToken;
+
+    @Column(nullable = false, length = 100)
+    private String userId;
+
+    @Column(length = 100)
     private String name;
 
-    @Column(name = "location")
+    @Column(length = 255)
     private String location;
 
-    @Column(name = "status", nullable = false)
-    private String status;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id")
-    @JsonIgnore
-    private User user;
-
-    @OneToMany(mappedBy = "device", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<DeviceData> deviceData = new ArrayList<>();
-
-    @OneToMany(mappedBy = "device", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Alert> alerts = new ArrayList<>();
+    // @Column(updatable = false)
+    // private Instant createdAt;
+    // private Instant updatedAt;
+    //
+    // @PrePersist
+    // protected void onCreate() { createdAt = Instant.now(); }
+    // @PreUpdate
+    // protected void onUpdate() { updatedAt = Instant.now(); }
 }
