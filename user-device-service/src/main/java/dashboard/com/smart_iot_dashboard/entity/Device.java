@@ -5,6 +5,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
+import java.time.Instant;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -30,6 +32,12 @@ public class Device {
 
     @Column(length = 255)
     private String location;
+
+    @Column(name = "is_active", nullable = false)
+    private boolean isActive = true;
+
+    @Column(name = "deactivated_at")
+    private Instant deactivatedAt;
 
     // @Column(updatable = false)
     // private Instant createdAt;

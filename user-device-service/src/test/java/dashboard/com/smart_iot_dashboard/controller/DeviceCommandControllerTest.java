@@ -69,20 +69,19 @@ class DeviceCommandControllerTest {
     void setUp() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
-    // ---
 
     private final String TEST_USER_ID = "user-jwt-subject-id";
     private final String TEST_DEVICE_ID = "device-abc-123";
 
     @Test
-    void sendCommandToDevice_Success() throws Exception {
+    void sendCommandToDevice_Success_WhenActive() throws Exception {
         // 1. Create a realistic mock device with the ID set
         Device mockDevice = new Device();
         mockDevice.setDeviceId(TEST_DEVICE_ID);
         mockDevice.setUserId(TEST_USER_ID);
 
         // 2. Simuliere, dass das Repository DIESES Gerät findet
-        when(deviceRepository.findByDeviceIdAndUserId(TEST_DEVICE_ID, TEST_USER_ID))
+        when(deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(TEST_DEVICE_ID, TEST_USER_ID))
                 .thenReturn(Optional.of(mockDevice));
 
         Map<String, Object> commandPayload = Map.of("command", "set_temp", "value", 25);
@@ -105,6 +104,23 @@ class DeviceCommandControllerTest {
     }
 
     @Test
+    void sendCommandToDevice_Fails_WhenInactive() throws Exception {
+        // Arrange
+        when(deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(TEST_DEVICE_ID, TEST_USER_ID))
+                .thenReturn(Optional.empty());
+
+        Map<String, Object> commandPayload = Map.of("command", "set_temp", "value", 25);
+
+        // Act & Assert
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/command", TEST_DEVICE_ID)
+                        .with(jwt().jwt(jwt -> jwt.subject(TEST_USER_ID)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(commandPayload))
+                )
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void deleteDevice_Success() throws Exception {
         when(deviceService.deleteDeviceByUser(TEST_DEVICE_ID, TEST_USER_ID))
                 .thenReturn(true);
@@ -114,6 +130,9 @@ class DeviceCommandControllerTest {
                         // .with(csrf())
                 )
                 .andExpect(status().isNoContent());
+
+        // Verify
+        verify(deviceService).deleteDeviceByUser(TEST_DEVICE_ID, TEST_USER_ID);
     }
 
     @Test

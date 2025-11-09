@@ -56,7 +56,7 @@ class MqttAuthControllerTest {
         Device mockDevice = new Device();
         mockDevice.setHashedDeviceToken("hashed-token-abc");
 
-        when(deviceRepository.findByDeviceId("sensor-123")).thenReturn(Optional.of(mockDevice));
+        when(deviceRepository.findByDeviceIdAndIsActiveTrue("sensor-123")).thenReturn(Optional.of(mockDevice));
         when(deviceTokenEncoder.matches("raw-token-abc", "hashed-token-abc")).thenReturn(true);
 
         mockMvc.perform(post("/api/internal/mqtt/auth")
@@ -75,7 +75,7 @@ class MqttAuthControllerTest {
         Device mockDevice = new Device();
         mockDevice.setHashedDeviceToken("hashed-token-abc");
 
-        when(deviceRepository.findByDeviceId("sensor-123")).thenReturn(Optional.of(mockDevice));
+        when(deviceRepository.findByDeviceIdAndIsActiveTrue("sensor-123")).thenReturn(Optional.of(mockDevice));
         when(deviceTokenEncoder.matches("wrong-token", "hashed-token-abc")).thenReturn(false);
 
         mockMvc.perform(post("/api/internal/mqtt/auth")
@@ -91,7 +91,7 @@ class MqttAuthControllerTest {
         authRequest.setUsername("sensor-404");
         authRequest.setPassword("any-token");
 
-        when(deviceRepository.findByDeviceId("sensor-404")).thenReturn(Optional.empty());
+        when(deviceRepository.findByDeviceIdAndIsActiveTrue("sensor-404")).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/internal/mqtt/auth")
                         // .with(csrf())

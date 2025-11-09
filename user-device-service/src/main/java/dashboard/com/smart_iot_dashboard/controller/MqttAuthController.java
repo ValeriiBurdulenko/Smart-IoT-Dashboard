@@ -50,7 +50,7 @@ public class MqttAuthController {
         }
 
         // 2. If it is not Bridge, check it as a regular device
-        Optional<Device> deviceOptional = deviceRepository.findByDeviceId(username);
+        Optional<Device> deviceOptional = deviceRepository.findByDeviceIdAndIsActiveTrue(username);
 
         if (deviceOptional.isPresent()) {
             Device device = deviceOptional.get();

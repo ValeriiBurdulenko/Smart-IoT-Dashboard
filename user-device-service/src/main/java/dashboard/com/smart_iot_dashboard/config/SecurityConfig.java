@@ -19,7 +19,12 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
 
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/devices/claim-with-code", "/api/internal/mqtt/auth", "/api/internal/mqtt/acl").permitAll()
+                        .requestMatchers(
+                                "/api/v1/devices/claim-with-code",
+                                "/api/internal/mqtt/auth",
+                                "/api/internal/mqtt/acl",
+                                "/api/internal/keycloak-events"
+                        ).permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated()
                 )

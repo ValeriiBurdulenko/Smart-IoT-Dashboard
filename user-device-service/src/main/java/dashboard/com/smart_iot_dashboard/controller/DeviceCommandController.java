@@ -31,7 +31,7 @@ public class DeviceCommandController {
         String userId = jwt.getSubject();
         log.info("User '{}' attempting to send command to device '{}'", userId, deviceId);
 
-        return deviceRepository.findByDeviceIdAndUserId(deviceId, userId)
+        return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
                 .map(device -> {
                     String commandTopic = "devices/" + device.getDeviceId() + "/commands";
 
