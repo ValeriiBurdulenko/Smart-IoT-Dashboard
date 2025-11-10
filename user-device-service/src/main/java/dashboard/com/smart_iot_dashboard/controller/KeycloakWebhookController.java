@@ -4,7 +4,6 @@ import dashboard.com.smart_iot_dashboard.dto.KeycloakEvent;
 import dashboard.com.smart_iot_dashboard.service.KeycloakWebhookService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,23 +20,12 @@ public class KeycloakWebhookController {
 
     private final KeycloakWebhookService webhookService;
 
-    @Value("${keycloak.webhook.secret}")
-    private String expectedApiKey;
-
-    private static final String API_KEY_HEADER = "X-Internal-Api-Key";
-
     @PostMapping
     public ResponseEntity<Void> handleKeycloakEvent(
-            @RequestHeader(value = API_KEY_HEADER, required = false) String apiKey,
             @RequestBody KeycloakEvent event) {
 
-        // 1. SECURITY CHECK: Checking our secret key
-        if (apiKey == null || !apiKey.equals(expectedApiKey)) {
-            log.warn("Unauthorized Keycloak webhook attempt. Invalid API Key.");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
-
-        // 2. PROCESSING: (Можно сделать асинхронно @Async, чтобы Keycloak не ждал)
+        // 1. PROCESSING:
+        // (TODO @Async, Keycloak not waiting)
         try {
             webhookService.processEvent(event);
             return ResponseEntity.ok().build(); // Always return 200 OK so Keycloak does not retry

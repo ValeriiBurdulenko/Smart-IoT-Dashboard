@@ -23,7 +23,7 @@ import java.util.Optional;
 public class MqttAuthController {
 
     private final DeviceRepository deviceRepository;
-    private final PasswordEncoder deviceTokenEncoder;
+    private final PasswordEncoder passwordEncoderInternal;
 
     @Value("${mqtt.bridge.username}")
     private String bridgeUsername;
@@ -54,7 +54,7 @@ public class MqttAuthController {
 
         if (deviceOptional.isPresent()) {
             Device device = deviceOptional.get();
-            if (deviceTokenEncoder.matches(password, device.getHashedDeviceToken())) {
+            if (passwordEncoderInternal.matches(password, device.getHashedDeviceToken())) {
                 log.info("MQTT Auth successful for deviceId: {}", username);
                 return ResponseEntity.ok().build();
             } else {

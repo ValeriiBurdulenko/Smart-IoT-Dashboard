@@ -17,6 +17,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -36,6 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = {DeviceCommandController.class, ProvisioningController.class, MqttAclController.class, MqttAuthController.class})
 @Import(SecurityConfig.class)
+@ActiveProfiles("dev")
 @TestPropertySource(properties = {
         "spring.security.oauth2.resourceserver.jwt.issuer-uri=http://dummy-issuer.com"
 })
@@ -56,8 +58,6 @@ class DeviceCommandControllerTest {
     private ProvisioningService provisioningService;
     @MockitoBean
     private DeviceRepository deviceRepository;
-    @MockitoBean
-    private PasswordEncoder passwordEncoder;
     @MockitoBean
     private StringRedisTemplate redisTemplate;
     @MockitoBean

@@ -40,8 +40,8 @@ class MqttAuthControllerTest {
     @MockitoBean
     private DeviceRepository deviceRepository;
 
-    @MockitoBean
-    private PasswordEncoder deviceTokenEncoder;
+    @Autowired
+    private PasswordEncoder passwordEncoderInternal;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -54,10 +54,9 @@ class MqttAuthControllerTest {
         authRequest.setPassword("raw-token-abc");
 
         Device mockDevice = new Device();
-        mockDevice.setHashedDeviceToken("hashed-token-abc");
+        mockDevice.setHashedDeviceToken(passwordEncoderInternal.encode("raw-token-abc"));
 
         when(deviceRepository.findByDeviceIdAndIsActiveTrue("sensor-123")).thenReturn(Optional.of(mockDevice));
-        when(deviceTokenEncoder.matches("raw-token-abc", "hashed-token-abc")).thenReturn(true);
 
         mockMvc.perform(post("/api/internal/mqtt/auth")
                         // .with(csrf())
@@ -73,10 +72,10 @@ class MqttAuthControllerTest {
         authRequest.setPassword("wrong-token");
 
         Device mockDevice = new Device();
-        mockDevice.setHashedDeviceToken("hashed-token-abc");
+        mockDevice.setHashedDeviceToken(passwordEncoderInternal.encode("raw-token-abc"));
 
         when(deviceRepository.findByDeviceIdAndIsActiveTrue("sensor-123")).thenReturn(Optional.of(mockDevice));
-        when(deviceTokenEncoder.matches("wrong-token", "hashed-token-abc")).thenReturn(false);
+        //when(passwordEncoderInternal.matches("wrong-token", "hashed-token-abc")).thenReturn(false);
 
         mockMvc.perform(post("/api/internal/mqtt/auth")
                         // .with(csrf())

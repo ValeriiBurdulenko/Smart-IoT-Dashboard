@@ -30,35 +30,16 @@ public class MqttAclController {
         String deviceId = aclRequest.getUsername();
         String topic = aclRequest.getTopic();
         int accessType = aclRequest.getAcc();
+        boolean allowed = false;
 
         log.debug("MQTT ACL check request: DeviceId='{}', Topic='{}', AccessType='{}'",
                 deviceId, topic, mapAccessTypeToString(accessType));
 
-        boolean allowed = false;
 
+        if(checkSystemBridge(deviceId, accessType, topic)){
+            allowed = true;
+        } else if(checkForRegularDevice(deviceId, accessType, topic)) allowed = true;
 
-        // 1. CHECK FOR SYSTEM BRIDGE
-        if (bridgeUsername != null && bridgeUsername.equals(deviceId)) {
-            if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
-                    topic.equals("iot/telemetry/ingress")) {
-                allowed = true;
-            }
-        }
-        // 2. CHECK FOR REGULAR DEVICES
-        else {
-            String expectedTelemetryTopic = "iot/telemetry/ingress";
-            String expectedCommandTopic = "devices/" + deviceId + "/commands";
-
-            if (accessType == MOSQ_ACL_WRITE) {
-                if (topic.equals(expectedTelemetryTopic)) {
-                    allowed = true;
-                }
-            } else if (accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) {
-                if (topic.equals(expectedCommandTopic)) {
-                    allowed = true;
-                }
-            }
-        }
 
         if (allowed) {
             log.info("MQTT ACL allowed: DeviceId='{}', Topic='{}', AccessType='{}'",
@@ -69,6 +50,34 @@ public class MqttAclController {
                     deviceId, topic, mapAccessTypeToString(accessType));
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+    }
+
+    private boolean checkSystemBridge(String deviceId, Integer accessType,String topic) {
+        if (bridgeUsername != null && bridgeUsername.equals(deviceId)) {
+            if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
+                    topic.equals("iot/telemetry/ingress")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean checkForRegularDevice(String deviceId, Integer accessType,String topic){
+        String expectedTelemetryTopic = "iot/telemetry/ingress";
+        String expectedCommandTopic = "devices/" + deviceId + "/commands";
+
+        if (accessType == MOSQ_ACL_WRITE) {
+            if (topic.equals(expectedTelemetryTopic)) {
+                return true;
+            }
+        } else if (accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) {
+            if (topic.equals(expectedCommandTopic)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private String mapAccessTypeToString(int acc) {

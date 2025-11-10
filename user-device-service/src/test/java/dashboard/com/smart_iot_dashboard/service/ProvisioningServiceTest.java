@@ -34,7 +34,7 @@ class ProvisioningServiceTest {
     private DeviceRepository deviceRepository;
 
     @Mock
-    private PasswordEncoder deviceTokenEncoder;
+    private PasswordEncoder passwordEncoderInternal;
 
     // Spezieller Mock für Redis' .opsForValue()
     @Mock
@@ -93,7 +93,7 @@ class ProvisioningServiceTest {
         when(valueOperations.get(redisKey)).thenReturn(testUserId);
 
         // 2. Simuliere die Antwort des PasswordEncoders
-        when(deviceTokenEncoder.encode(anyString())).thenReturn(dummyHash);
+        when(passwordEncoderInternal.encode(anyString())).thenReturn(dummyHash);
 
         // 3. Simuliere die Antwort des Repositories (gibt das gespeicherte Objekt zurück)
         when(deviceRepository.save(any(Device.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -112,7 +112,7 @@ class ProvisioningServiceTest {
         // --- Überprüfe die Interaktionen ---
 
         // 1. Wurde der Encoder mit dem *rohen* Token aufgerufen?
-        verify(deviceTokenEncoder).encode(eq(response.getDeviceToken()));
+        verify(passwordEncoderInternal).encode(eq(response.getDeviceToken()));
 
         // 2. Wurde das korrekte Objekt in der DB gespeichert?
         // Wir fangen das Objekt ab, das an deviceRepository.save() übergeben wurde
