@@ -33,7 +33,8 @@ build/
 .vscode/
 
 /.venv/
-/Keycloak/keycloak-26.4.2/
+/Keycloak/keycloak-26.4.0/*
+!/Keycloak/keycloak-26.4.0/themes
 
 certs/*.key
 
