@@ -65,6 +65,7 @@ public class SecurityConfig {
     @Order(2)
     public SecurityFilterChain userApiSecurityChain(HttpSecurity http) throws Exception {
         http
+                .cors(withDefaults())
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/devices/claim-with-code").permitAll()

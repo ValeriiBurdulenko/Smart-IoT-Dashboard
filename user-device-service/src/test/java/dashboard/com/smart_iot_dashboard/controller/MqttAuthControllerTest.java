@@ -75,7 +75,6 @@ class MqttAuthControllerTest {
         mockDevice.setHashedDeviceToken(passwordEncoderInternal.encode("raw-token-abc"));
 
         when(deviceRepository.findByDeviceIdAndIsActiveTrue("sensor-123")).thenReturn(Optional.of(mockDevice));
-        //when(passwordEncoderInternal.matches("wrong-token", "hashed-token-abc")).thenReturn(false);
 
         mockMvc.perform(post("/api/internal/mqtt/auth")
                         // .with(csrf())

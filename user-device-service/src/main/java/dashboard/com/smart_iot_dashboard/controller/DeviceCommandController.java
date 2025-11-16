@@ -1,5 +1,7 @@
 package dashboard.com.smart_iot_dashboard.controller;
 
+import dashboard.com.smart_iot_dashboard.dto.DeviceDTO;
+import dashboard.com.smart_iot_dashboard.entity.Device;
 import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import dashboard.com.smart_iot_dashboard.service.DeviceService;
 import dashboard.com.smart_iot_dashboard.service.MqttGateway;
@@ -11,6 +13,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/devices")
@@ -68,5 +72,14 @@ public class DeviceCommandController {
             log.warn("Device '{}' not found or not owned by user '{}'", deviceId, userId);
             return ResponseEntity.notFound().build();
         }
+    }
+
+    @GetMapping
+    public ResponseEntity<List<DeviceDTO>> getDevicesForCurrentUser(@AuthenticationPrincipal Jwt jwt) {
+        String userId = jwt.getSubject();
+
+        List<DeviceDTO> devices = deviceService.findAllDevicesByUserIdAndIsActiveTrue(userId);
+
+        return ResponseEntity.ok(devices);
     }
 }

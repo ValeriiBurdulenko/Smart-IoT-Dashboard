@@ -1,6 +1,7 @@
 package dashboard.com.smart_iot_dashboard.controller;
 
 import dashboard.com.smart_iot_dashboard.dto.MqttAclRequest;
+import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +20,7 @@ public class MqttAclController {
 
     @Value("${mqtt.bridge.username}")
     private String bridgeUsername;
+    private final DeviceRepository deviceRepository;
 
     private static final int MOSQ_ACL_READ = 1;
     private static final int MOSQ_ACL_WRITE = 2;
@@ -53,28 +55,30 @@ public class MqttAclController {
     }
 
     private boolean checkSystemBridge(String deviceId, Integer accessType,String topic) {
-        if (bridgeUsername != null && bridgeUsername.equals(deviceId)) {
-            if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
+        if (bridgeUsername != null && bridgeUsername.equals(deviceId) && (accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
                     topic.equals("iot/telemetry/ingress")) {
                 return true;
             }
-        }
+
 
         return false;
     }
 
     private boolean checkForRegularDevice(String deviceId, Integer accessType,String topic){
+        boolean isActive = deviceRepository.findByDeviceIdAndIsActiveTrue(deviceId).isPresent();
+
+        if (!isActive) {
+            log.warn("ACL Check: Device '{}' is not active or does not exist. Denying.", deviceId);
+            return false;
+        }
+
         String expectedTelemetryTopic = "iot/telemetry/ingress";
         String expectedCommandTopic = "devices/" + deviceId + "/commands";
 
-        if (accessType == MOSQ_ACL_WRITE) {
-            if (topic.equals(expectedTelemetryTopic)) {
-                return true;
-            }
-        } else if (accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) {
-            if (topic.equals(expectedCommandTopic)) {
-                return true;
-            }
+        if ((accessType == MOSQ_ACL_WRITE) && topic.equals(expectedTelemetryTopic)) {
+            return true;
+        } else if (((accessType == MOSQ_ACL_READ) || (accessType == MOSQ_ACL_SUBSCRIBE)) && topic.equals(expectedCommandTopic)) {
+            return true;
         }
 
         return false;

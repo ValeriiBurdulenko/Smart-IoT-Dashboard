@@ -1,6 +1,8 @@
 import axios from 'axios';
 import KeycloakService from './KeycloakService';
 
+import type { Device } from '../types';
+
 
 const apiClient = axios.create({
     baseURL: import.meta.env.VITE_BACKEND_API_URL
@@ -33,5 +35,17 @@ apiClient.interceptors.response.use(
         return Promise.reject(error);
     }
 );
+
+export const getDevices = (): Promise<Device[]> => {
+    return apiClient.get('/devices').then(res => res.data);
+};
+
+export const deleteDevice = (externalId: string): Promise<void> => {
+    return apiClient.delete(`/devices/${externalId}`);
+};
+
+export const generateClaimCode = (): Promise<{ claimCode: string }> => {
+    return apiClient.post('/devices/generate-claim-code').then(res => res.data);
+};
 
 export default apiClient;

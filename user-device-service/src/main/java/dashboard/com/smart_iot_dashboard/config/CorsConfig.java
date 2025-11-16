@@ -15,7 +15,7 @@ public class CorsConfig {
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
                         .allowedOrigins(
-                                "http://localhost:3000", // React
+                                "http://localhost:5173", // React
                                 "http://localhost:4200" // Angular
                                 // You can add another one
                         )

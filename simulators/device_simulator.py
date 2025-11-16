@@ -91,7 +91,7 @@ def save_current_state():
 
 # --- 5. Provisioning Mode ---
 
-HTML_TEMPLATE = """
+HTML_TEMPLATE = r"""
 <!doctype html>
 <html lang="en">
 <head>
