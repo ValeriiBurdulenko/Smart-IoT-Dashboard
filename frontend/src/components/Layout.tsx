@@ -14,7 +14,7 @@ import {
     ListItemText,
     IconButton,
     Menu,
-    MenuItem
+    MenuItem,
 } from '@mui/material';
 
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -25,7 +25,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
 const drawerWidth = 280;
 
@@ -35,6 +35,9 @@ const Layout: React.FC = () => {
 
     const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
     const isMenuOpen = Boolean(anchorEl);
+
+    const location = useLocation();
+    const isDashboardPage = location.pathname === '/dashboard' || location.pathname === '/';
 
     const handleDrawerToggle = () => {
         setMobileOpen(!mobileOpen);
@@ -164,10 +167,13 @@ const Layout: React.FC = () => {
                     >
                         <MenuIcon />
                     </IconButton>
-
-                    <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-                        Dashboard
-                    </Typography>
+                    {isDashboardPage ? (
+                        <Typography variant="h5" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
+                            Dashboard
+                        </Typography>
+                    ) : (
+                        <Box sx={{ flexGrow: 1 }} />
+                    )}
                 </Toolbar>
             </AppBar>
 
@@ -242,7 +248,10 @@ const Layout: React.FC = () => {
                     flexGrow: 1,
                     p: 3,
                     width: { sm: `calc(100% - ${drawerWidth}px)` },
-                    bgcolor: 'background.default'
+                    bgcolor: 'background.default',
+                    minHeight: '100vh',
+                    display: 'flex',
+                    flexDirection: 'column'
                 }}
             >
                 <Toolbar />

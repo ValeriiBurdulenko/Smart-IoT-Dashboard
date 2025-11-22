@@ -23,6 +23,7 @@ const DevicesPage: React.FC = () => {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [deviceToDelete, setDeviceToDelete] = useState<Device | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const fetchDevices = () => {
         setLoading(true);
@@ -45,20 +46,29 @@ const DevicesPage: React.FC = () => {
     };
 
     const handleCloseDeleteDialog = () => {
-        setDeviceToDelete(null);
-        setIsDeleteModalOpen(false);
+        if (!isDeleting) {
+            setDeviceToDelete(null);
+            setIsDeleteModalOpen(false);
+        }
     };
 
     const handleConfirmDelete = () => {
         if (!deviceToDelete) return;
 
+        setIsDeleting(true);
+
         deleteDevice(deviceToDelete.deviceId)
-            .then(() => fetchDevices())
+            .then(() => {
+                fetchDevices();
+                setDeviceToDelete(null);
+                setIsDeleteModalOpen(false);
+            })
             .catch(err => {
                 console.error("Error deleting device:", err);
                 setError("Failed to delete device.");
+                setIsDeleteModalOpen(false);
             })
-            .finally(() => handleCloseDeleteDialog());
+            .finally(() => setIsDeleting(false));
     };
 
     // Paginierungs-Logik
@@ -70,9 +80,16 @@ const DevicesPage: React.FC = () => {
     );
 
     return (
-        <Box>
+        <Box sx={{ width: '100%', maxWidth: '100%' }}>
             {/* Header: Titel und Button */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Box sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%',
+                mb: 4,
+                mt: 1
+            }}>
                 <Typography variant="h4">Geräte</Typography>
                 <Button variant="contained" startIcon={<AddIcon />} onClick={() => setIsAddModalOpen(true)}>
                     Gerät hinzufügen
@@ -156,6 +173,7 @@ const DevicesPage: React.FC = () => {
                     onClose={handleCloseDeleteDialog}
                     onConfirm={handleConfirmDelete}
                     deviceName={deviceToDelete.name || deviceToDelete.deviceId}
+                    isLoading={isDeleting}
                 />
             )}
         </Box>

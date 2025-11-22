@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Modal, Box, Typography, Button, CircularProgress, Alert
 } from '@mui/material';
@@ -29,6 +29,14 @@ const AddDeviceModal: React.FC<Props> = ({ open, onClose, onDeviceClaimed }) => 
     const [claimCode, setClaimCode] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
+    useEffect(() => {
+        if (!open) {
+            setClaimCode(null);
+            setError(null);
+            setIsLoading(false);
+        }
+    }, [open]);
+
     const handleGenerateCode = () => {
         setIsLoading(true);
         setError(null);
@@ -48,9 +56,6 @@ const AddDeviceModal: React.FC<Props> = ({ open, onClose, onDeviceClaimed }) => 
     };
 
     const handleClose = () => {
-        setClaimCode(null);
-        setError(null);
-        setIsLoading(false);
         onClose();
     };
 

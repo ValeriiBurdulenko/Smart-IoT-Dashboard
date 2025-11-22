@@ -32,14 +32,21 @@ public class MqttIntegrationConfig {
     @Value("${mqtt.client.id.outbound}")
     private String mqttClientIdOutbound;
 
+    @Value("${mqtt.bridge.username}")
+    private String bridgeUsername;
+
+    @Value("${mqtt.bridge.password}")
+    private String bridgePassword;
+
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
         MqttConnectOptions options = new MqttConnectOptions();
         options.setServerURIs(new String[] { mqttBrokerUrlTls });
-        // Add username/password if Mosquitto requires it via go-auth
-        // options.setUserName("backendUsername"); // This needs to be checked by go-auth
-        // options.setPassword("backendPassword".toCharArray());
+
+
+        options.setUserName(bridgeUsername);
+        options.setPassword(bridgePassword.toCharArray());
 
         // --- TLS Configuration ---
         try (InputStream caInput = new ClassPathResource("ca.crt").getInputStream()) {

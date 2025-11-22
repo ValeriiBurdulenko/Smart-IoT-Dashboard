@@ -5,7 +5,8 @@ import {
     DialogActions,
     DialogContent,
     DialogContentText,
-    DialogTitle
+    DialogTitle,
+    CircularProgress
 } from '@mui/material';
 
 interface Props {
@@ -13,13 +14,14 @@ interface Props {
     onClose: () => void;
     onConfirm: () => void;
     deviceName: string;
+    isLoading: boolean;
 }
 
-const ConfirmDeleteDialog: React.FC<Props> = ({ open, onClose, onConfirm, deviceName }) => {
+const ConfirmDeleteDialog: React.FC<Props> = ({ open, onClose, onConfirm, deviceName, isLoading }) => {
     return (
         <Dialog
             open={open}
-            onClose={onClose}
+            onClose={!isLoading ? onClose : undefined}
             aria-labelledby="alert-dialog-title"
             aria-describedby="alert-dialog-description"
         >
@@ -33,12 +35,24 @@ const ConfirmDeleteDialog: React.FC<Props> = ({ open, onClose, onConfirm, device
             </DialogContent>
             <DialogActions sx={{ p: 2 }}>
                 {/* "Abbrechen"-Button */}
-                <Button onClick={onClose} color="primary" variant="outlined">
+                <Button
+                    onClick={onClose}
+                    color="primary"
+                    variant="outlined"
+                    disabled={isLoading}
+                >
                     Abbrechen
                 </Button>
                 {/* "Löschen"-Button (Rot für Gefahr) */}
-                <Button onClick={onConfirm} color="error" variant="contained" autoFocus>
-                    Löschen
+                <Button
+                    onClick={onConfirm}
+                    color="error"
+                    variant="contained"
+                    autoFocus
+                    disabled={isLoading}
+                    startIcon={isLoading ? <CircularProgress size={20} color="inherit" /> : null}
+                >
+                    {isLoading ? "Löschen..." : "Löschen"}
                 </Button>
             </DialogActions>
         </Dialog>

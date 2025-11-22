@@ -55,10 +55,19 @@ public class MqttAclController {
     }
 
     private boolean checkSystemBridge(String deviceId, Integer accessType,String topic) {
-        if (bridgeUsername != null && bridgeUsername.equals(deviceId) && (accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
+        if (bridgeUsername != null && bridgeUsername.equals(deviceId)) {
+
+            if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
                     topic.equals("iot/telemetry/ingress")) {
                 return true;
             }
+
+            if (accessType == MOSQ_ACL_WRITE &&
+                    topic.startsWith("devices/") &&
+                    topic.endsWith("/commands")) {
+                return true;
+            }
+        }
 
 
         return false;
