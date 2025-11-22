@@ -40,3 +40,7 @@ certs/*.key
 
 .env
 *.env
+
+*.log
+*.properties
+credentials_*.json
