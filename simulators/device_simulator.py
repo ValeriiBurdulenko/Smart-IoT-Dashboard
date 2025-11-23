@@ -58,7 +58,7 @@ flask_server = None
 
 # --- 3. Simulation State Variables ---
 current_temp = 22.0
-target_temp = 20.0
+target_temp = None
 heating_on = False
 
 def print_config():
@@ -239,6 +239,10 @@ def on_message(client, userdata, msg):
 def simulate_climate_control():
     global current_temp, heating_on
 
+    if target_temp is None:
+        heating_on = False
+        return
+
     if heating_on:
         current_temp += random.uniform(0.3, 0.8)
         if current_temp >= target_temp: heating_on = False
@@ -248,9 +252,8 @@ def simulate_climate_control():
 
     current_temp = round(current_temp + random.uniform(-0.1, 0.1), 2)
 
-def generate_telemetry():
-    simulate_climate_control()
-    return {
+def generate_telemetry_payload():
+    return json.dumps({
         "deviceId": device_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "data": {
@@ -258,7 +261,7 @@ def generate_telemetry():
             "targetTemperature": target_temp,
             "heatingStatus": heating_on
         }
-    }
+    })
 
 def perform_factory_reset():
     print(f"[{PROVISIONING_SERVER_PORT}] Performing Factory Reset...")
@@ -332,9 +335,12 @@ def main_loop():
                 print(f"[{PROVISIONING_SERVER_PORT}] Authorization revoked. Stopping...")
                 break
 
+            # --- 1. ALWAYS: Simulating physics (Autonomous Edge Computing) ---
+            simulate_climate_control()
+
+            # --- 2. IF THERE IS A CONNECTION: Send data ---
             if connected_to_mqtt:
-                telemetry = generate_telemetry()
-                payload = json.dumps(telemetry)
+                payload = generate_telemetry_payload()
                 result = mqtt_client.publish(TELEMETRY_TOPIC, payload, qos=1)
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
                     telemetry_count += 1
@@ -343,7 +349,11 @@ def main_loop():
                 else:
                     print(f"⚠[{PROVISIONING_SERVER_PORT}] Failed to send telemetry, code: {result.rc}")
             else:
-                print(f"[{PROVISIONING_SERVER_PORT}] MQTT not connected, waiting...")
+                # --- 3. IF THERE IS NO CONNECTION: Work silently ---
+                if telemetry_count % 12 == 0:
+                    print(f"[{PROVISIONING_SERVER_PORT}] MQTT not connected, waiting...")
+                    print(f"💾 [{PROVISIONING_SERVER_PORT}] Offline Mode: Controlling temp... {current_temp}°C (Target: {target_temp})")
+                telemetry_count += 1
 
             time.sleep(PUBLISH_INTERVAL)
     except KeyboardInterrupt:
