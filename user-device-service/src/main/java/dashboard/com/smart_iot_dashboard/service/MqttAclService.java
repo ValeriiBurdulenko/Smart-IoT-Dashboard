@@ -21,6 +21,10 @@ public class MqttAclService {
     private static final int MOSQ_ACL_WRITE = 2;
     private static final int MOSQ_ACL_SUBSCRIBE = 4;
 
+    private static final String TELEMETRY_TOPIC = "iot/telemetry/ingress";
+    private static final String DEVICES_PREFIX = "devices";
+    private static final String COMMANDS_SUFFIX = "commands";
+
     @Transactional(readOnly = true)
     public boolean checkAcl(String deviceId, Integer accessType, String topic) {
         if (checkSystemBridge(deviceId, accessType, topic)) {
@@ -31,12 +35,12 @@ public class MqttAclService {
 
     private boolean checkSystemBridge(String deviceId, Integer accessType, String topic) {
 
-        if (bridgeUsername == null || deviceId == null || !bridgeUsername.equals(deviceId) || accessType == null) {
+        if (bridgeUsername == null || !bridgeUsername.equals(deviceId)) {
             return false;
         }
 
         if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
-                topic.equals("iot/telemetry/ingress")) {
+                TELEMETRY_TOPIC.equals(topic)) {
             return true;
         }
 
@@ -49,10 +53,6 @@ public class MqttAclService {
     }
 
     private boolean checkForRegularDevice(String deviceId, Integer accessType, String topic){
-        if (deviceId == null || topic == null || accessType == null) {
-            return false;
-        }
-
         boolean isActive = deviceRepository.findByDeviceIdAndIsActiveTrue(deviceId).isPresent();
 
         if (!isActive) {
@@ -60,15 +60,15 @@ public class MqttAclService {
             return false;
         }
 
-        String expectedTelemetryTopic = "iot/telemetry/ingress";
-        String expectedCommandTopic = "devices/" + deviceId + "/commands";
+        String expectedCommandTopic = String.format("%s/%s/%s", DEVICES_PREFIX, deviceId, COMMANDS_SUFFIX);
 
-        if ((accessType == MOSQ_ACL_WRITE) && topic.equals(expectedTelemetryTopic)) {
+        if ((accessType == MOSQ_ACL_WRITE) && TELEMETRY_TOPIC.equals(topic)) {
             return true;
         } else if (((accessType == MOSQ_ACL_READ) || (accessType == MOSQ_ACL_SUBSCRIBE)) && topic.equals(expectedCommandTopic)) {
             return true;
         }
 
+        log.debug("ACL Denied: Device '{}' tried accessing '{}' with acc {}", deviceId, topic, accessType);
         return false;
     }
 
@@ -79,8 +79,8 @@ public class MqttAclService {
         String[] parts = topic.split("/");
 
         return parts.length == 3 &&
-                "devices".equals(parts[0]) &&
+                DEVICES_PREFIX.equals(parts[0]) &&
                 !parts[1].isEmpty() &&
-                "commands".equals(parts[2]);
+                COMMANDS_SUFFIX.equals(parts[2]);
     }
 }

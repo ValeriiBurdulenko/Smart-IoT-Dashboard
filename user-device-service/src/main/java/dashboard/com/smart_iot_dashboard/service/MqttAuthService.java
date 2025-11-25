@@ -55,12 +55,25 @@ public class MqttAuthService {
 
         if (deviceOptional.isPresent()) {
             Device device = deviceOptional.get();
-            if (passwordEncoderInternal.matches(password, device.getHashedDeviceToken())) {
-                log.info("MQTT Auth successful for deviceId: {}", deviceId);
-                return true;
-            } else {
-                log.warn("MQTT Auth failed (Invalid Token) for deviceId: {}", deviceId);
+            String storedHash = device.getHashedDeviceToken();
+
+            if (storedHash == null || storedHash.isBlank()) {
+                log.error("Security Alert: Device '{}' has NO token hash in DB. Denying access.", deviceId);
+                return false;
             }
+            try {
+                if (passwordEncoderInternal.matches(password, device.getHashedDeviceToken())) {
+                    log.info("MQTT Auth successful for deviceId: {}", deviceId);
+                    return true;
+                } else {
+                    log.warn("MQTT Auth failed (Invalid Token) for deviceId: {}", deviceId);
+                }
+            } catch (IllegalArgumentException e) {
+                log.error("Security Error: Malformed password hash for device '{}': {}", deviceId, e.getMessage());
+            } catch (Exception e) {
+                log.error("Unexpected error during auth for device '{}': {}", deviceId, e.getMessage());
+            }
+
         } else {
             log.warn("MQTT Auth failed (Device ID Not Found or Inactive): {}", deviceId);
         }

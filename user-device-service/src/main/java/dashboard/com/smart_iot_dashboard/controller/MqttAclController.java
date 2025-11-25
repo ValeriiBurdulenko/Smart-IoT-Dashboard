@@ -1,12 +1,10 @@
 package dashboard.com.smart_iot_dashboard.controller;
 
 import dashboard.com.smart_iot_dashboard.dto.MqttAclRequest;
-import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import dashboard.com.smart_iot_dashboard.service.MqttAclService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;

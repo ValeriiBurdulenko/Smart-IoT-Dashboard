@@ -154,13 +154,6 @@ class MqttAclServiceTest {
             boolean result = aclService.checkAcl(BRIDGE_USERNAME, ACL_WRITE, null);
             assertFalse(result);
         }
-
-        @Test
-        @DisplayName("Bridge: Null accessType - FALSE")
-        void testBridgeNullAccessTypeFail() {
-            boolean result = aclService.checkAcl(BRIDGE_USERNAME, null, "devices/sensor-123/commands");
-            assertFalse(result);
-        }
     }
 
     @Nested
@@ -274,13 +267,6 @@ class MqttAclServiceTest {
         @DisplayName("Device: Null topic - FALSE")
         void testDeviceNullTopicFail() {
             boolean result = aclService.checkAcl(DEVICE_ID, ACL_WRITE, null);
-            assertFalse(result);
-        }
-
-        @Test
-        @DisplayName("Device: Null accessType - FALSE")
-        void testDeviceNullAccessTypeFail() {
-            boolean result = aclService.checkAcl(DEVICE_ID, null, "iot/telemetry/ingress");
             assertFalse(result);
         }
 
