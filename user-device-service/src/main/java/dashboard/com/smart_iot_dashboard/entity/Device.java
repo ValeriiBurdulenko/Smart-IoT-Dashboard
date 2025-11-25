@@ -39,6 +39,9 @@ public class Device {
     @Column(name = "deactivated_at")
     private Instant deactivatedAt;
 
+    @Column(name = "target_temperature")
+    private Double targetTemperature = 20.0;
+
     // @Column(updatable = false)
     // private Instant createdAt;
     // private Instant updatedAt;

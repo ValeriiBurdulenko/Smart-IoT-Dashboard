@@ -2,6 +2,7 @@ package dashboard.com.smart_iot_dashboard.service;
 
 import dashboard.com.smart_iot_dashboard.entity.Device;
 import dashboard.com.smart_iot_dashboard.dto.DeviceDTO;
+import dashboard.com.smart_iot_dashboard.exception.DeviceNotFoundException;
 import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,19 +28,9 @@ public class DeviceService {
     public boolean deleteDeviceByUser(String deviceId, String userId) {
         return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
                 .map(device -> {
-                    try {
-                        String killCommand = "{\"command\": \"reset_device\", \"value\": 0}";
-                        String topic = "devices/" + device.getDeviceId() + "/commands";
+                    String confirmCode = device.getDeviceId().substring(0, 8);
 
-                        log.info("Sending KILL command to device: {}", deviceId);
-
-                        mqttGateway.sendCommand(killCommand, topic);
-
-                    } catch (Exception e) {
-                        // Protokollieren, aber das Löschen NICHT unterbrechen.
-                        // Wenn das Gerät offline ist, wird es trotzdem aus der Datenbank gelöscht.
-                        log.warn("Failed to send kill command to device {}: {}", deviceId, e.getMessage());
-                    }
+                    sendMqttCommand(device.getDeviceId(), "reset_device", confirmCode, 1, false);
 
                     device.setActive(false);
                     device.setDeactivatedAt(Instant.now());
@@ -51,6 +42,19 @@ public class DeviceService {
                     return true;
                 })
                 .orElse(false);
+    }
+
+    @Transactional
+    public void updateTargetTemperature(String deviceId, String userId, Double newTemp) {
+        Device device = deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
+                .orElseThrow(() -> new DeviceNotFoundException("Device not found: " + deviceId));
+
+        device.setTargetTemperature(newTemp);
+        deviceRepository.save(device);
+
+        log.info("Device {} target temp updated to {} in DB", deviceId, newTemp);
+
+        sendMqttCommand(device.getDeviceId(), "set_target_temp", newTemp, 1, true);
     }
 
     @Transactional(readOnly = true) // readOnly = true ist eine gute Optimierung für GET
@@ -65,15 +69,27 @@ public class DeviceService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
+    public DeviceDTO updateDeviceName(String deviceId, String userId, String newName) {
+        Device device = deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
+                .orElseThrow(() -> new DeviceNotFoundException("Device not found or access denied: " + deviceId));
+
+        device.setName(newName);
+        Device saved = deviceRepository.save(device);
+        log.info("Device {} name updated to '{}'", deviceId, newName);
+        return convertToDTO(saved);
+    }
+
     private DeviceDTO convertToDTO(Device device) {
-        DeviceDTO dto = new DeviceDTO();
-        dto.setDeviceId(device.getDeviceId());
-        dto.setName(device.getName());
-        dto.setLocation(device.getLocation());
-        dto.setActive(device.isActive());
-        dto.setDeactivatedAt(device.getDeactivatedAt());
+        return DeviceDTO.builder()
+                .deviceId(device.getDeviceId())
+                .name(device.getName())
+                .location(device.getLocation())
+                .isActive(device.isActive())
+                .deactivatedAt(device.getDeactivatedAt())
+                .targetTemperature(device.getTargetTemperature())
+                .build();
         // Das Feld 'hashedDeviceToken' wird ignoriert und nie kopiert.
-        return dto;
     }
 
     private void clearAuthCache(String deviceId) {
@@ -96,6 +112,30 @@ public class DeviceService {
             // If Redis is unavailable, the device will still be deleted from the database (Postgres),
             // it will simply disconnect from the broker with a 5-minute delay.
             log.error("Failed to clear Redis cache for device {}: {}", deviceId, e.getMessage());
+        }
+    }
+
+    private void sendMqttCommand(String deviceId, String commandName, Object value, int qos, boolean retained) {
+        try {
+            String payload;
+
+            if (value instanceof String) {
+                payload = String.format("{\"command\": \"%s\", \"value\": \"%s\"}", commandName, value);
+            }
+            else {
+                payload = String.format("{\"command\": \"%s\", \"value\": %s}", commandName, value);
+            }
+
+            String topic = "devices/" + deviceId + "/commands";
+
+            log.info("Sending MQTT command '{}' to {}. Retained: {}", commandName, deviceId, retained);
+
+            mqttGateway.sendCommand(payload, topic, qos, retained);
+
+        } catch (Exception e) {
+            // Protokollieren, aber das Löschen NICHT unterbrechen.
+            // Wenn das Gerät offline ist, wird es trotzdem aus der Datenbank gelöscht oder Command wird gesendet.
+            log.warn("Failed to send MQTT command '{}' to device {}: {}", commandName, deviceId, e.getMessage());
         }
     }
 }

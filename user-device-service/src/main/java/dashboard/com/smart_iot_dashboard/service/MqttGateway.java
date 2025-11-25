@@ -9,5 +9,10 @@ import org.springframework.stereotype.Component;
 @MessagingGateway(defaultRequestChannel = "mqttOutboundChannel") // Sends messages to this channel
 public interface MqttGateway {
 
-    void sendCommand(String payload, @Header(MqttHeaders.TOPIC) String topic);
+    void sendCommand(
+            String payload,
+            @Header(MqttHeaders.TOPIC) String topic,
+            @Header(MqttHeaders.QOS) int qos,
+            @Header(MqttHeaders.RETAINED) boolean retained
+    );
 }

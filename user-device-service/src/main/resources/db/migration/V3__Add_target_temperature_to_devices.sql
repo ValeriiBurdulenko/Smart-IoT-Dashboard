@@ -1,0 +1,2 @@
+ALTER TABLE devices
+    ADD COLUMN target_temperature DOUBLE PRECISION DEFAULT 20.0;
