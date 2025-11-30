@@ -7,8 +7,16 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+
+      ZOOKEEPER_AUTH_PROVIDER_1: "org.apache.zookeeper.server.auth.SASLAuthenticationProvider"
+      ZOOKEEPER_REQUIRE_CLIENT_AUTH_SCHEME: "sasl"
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/zookeeper_jaas.conf"
+    volumes:
+      - ./kafka-config/kafka_server_jaas.conf:/etc/kafka/zookeeper_jaas.conf:ro
     ports:
       - "2181:2181"
+    networks:
+      - iot-network
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -17,14 +25,55 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
+    volumes:
+      # --- JAAS config for Kafka ---
+      - ./kafka-config/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
+      - kafka_data:/var/lib/kafka/data
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://<IP>:9092,PLAINTEXT_INTERNAL://kafka:29092
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_INTERNAL:SASL_PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,SASL_INTERNAL://kafka:29092
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,SASL_INTERNAL://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_INTERNAL
+
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf -Dallow.everyone.if.no.acl.found=false"
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      KAFKA_SUPER_USERS: User:admin
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: INFO
+      KAFKA_LOG4J_LOGGERS: "kafka.authorizer.logger=INFO,state.change.logger=INFO"
+    networks:
+      - iot-network  
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "echo 'security.protocol=SASL_PLAINTEXT\nsasl.mechanism=PLAIN\nsasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"admin-secret\";' > /tmp/healthcheck.properties && kafka-broker-api-versions --bootstrap-server localhost:9092 --command-config /tmp/healthcheck.properties"
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./kafka-config/init_acls.sh:/init_acls.sh:ro
+    command: "bash /init_acls.sh"
+    networks:
+      - iot-network
+    restart: "no"
 
   redis:
     image: redis:7-alpine
@@ -34,6 +83,8 @@ services:
     command: redis-server --requirepass your_redis_password
     volumes:
       - redis_data:/data
+    networks:
+      - iot-network
     restart: unless-stopped
 
   mosquitto:
@@ -51,10 +102,17 @@ services:
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
       - ./certs:/mosquitto/certs:ro
+    networks:
+      - iot-network
     restart: unless-stopped
 
 volumes:
   redis_data:
   mosquitto_data:
   mosquitto_log:
+  kafka_data:
   # Don't forget that Kafka and Zookeeper also use volumes (usually implicitly).
+
+networks:
+  iot-network:
+    driver: bridge
