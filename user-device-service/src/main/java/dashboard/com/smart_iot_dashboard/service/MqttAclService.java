@@ -21,7 +21,7 @@ public class MqttAclService {
     private static final int MOSQ_ACL_WRITE = 2;
     private static final int MOSQ_ACL_SUBSCRIBE = 4;
 
-    private static final String TELEMETRY_TOPIC = "iot/telemetry/ingress";
+    private static final String TELEMETRY_PREFIX = "iot/telemetry";
     private static final String DEVICES_PREFIX = "devices";
     private static final String COMMANDS_SUFFIX = "commands";
 
@@ -33,23 +33,22 @@ public class MqttAclService {
         return checkForRegularDevice(deviceId, accessType, topic);
     }
 
-    private boolean checkSystemBridge(String deviceId, Integer accessType, String topic) {
+    private boolean checkSystemBridge(String username, Integer accessType, String topic) {
 
-        if (bridgeUsername == null || !bridgeUsername.equals(deviceId)) {
+        if (bridgeUsername == null || !bridgeUsername.equals(username)) {
             return false;
         }
 
-        if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
-                TELEMETRY_TOPIC.equals(topic)) {
-            return true;
+        if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE)) {
+            if ((TELEMETRY_PREFIX + "/+").equals(topic)) {
+                return true;
+            }
+            if (topic.startsWith(TELEMETRY_PREFIX + "/")) {
+                return true;
+            }
         }
 
-        if (accessType == MOSQ_ACL_WRITE && isValidDeviceCommandsTopic(topic)) {
-            return true;
-        }
-
-
-        return false;
+        return accessType == MOSQ_ACL_WRITE && isValidDeviceCommandsTopic(topic);
     }
 
     private boolean checkForRegularDevice(String deviceId, Integer accessType, String topic){
@@ -60,11 +59,20 @@ public class MqttAclService {
             return false;
         }
 
-        String expectedCommandTopic = String.format("%s/%s/%s", DEVICES_PREFIX, deviceId, COMMANDS_SUFFIX);
+        String allowedTelemetryTopic = TELEMETRY_PREFIX + "/" + deviceId;
 
-        if ((accessType == MOSQ_ACL_WRITE) && TELEMETRY_TOPIC.equals(topic)) {
-            return true;
-        } else if (((accessType == MOSQ_ACL_READ) || (accessType == MOSQ_ACL_SUBSCRIBE)) && topic.equals(expectedCommandTopic)) {
+        if (accessType == MOSQ_ACL_WRITE) {
+            if (allowedTelemetryTopic.equals(topic)) {
+                return true;
+            } else {
+                log.warn("Security Alert: Device '{}' tried writing to '{}' (Access Denied)", deviceId, topic);
+                return false;
+            }
+        }
+
+        String allowedCommandTopic = String.format("%s/%s/%s", DEVICES_PREFIX, deviceId, COMMANDS_SUFFIX);
+
+        if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) && topic.equals(allowedCommandTopic)) {
             return true;
         }
 

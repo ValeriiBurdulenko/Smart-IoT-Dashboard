@@ -49,7 +49,7 @@ MQTT_USE_TLS = os.getenv('MQTT_USE_TLS', 'false').lower() == 'true'
 MQTT_PORT_TLS = int(os.getenv('MQTT_BROKER_PORT_TLS', "8883"))
 MQTT_PORT = int(os.getenv('MQTT_BROKER_PORT', "1883"))
 MQTT_CA_CERT = os.getenv('MQTT_CA_CERT', "ca.crt")
-TELEMETRY_TOPIC = os.getenv('TELEMETRY_TOPIC', "iot/telemetry/ingress")
+TELEMETRY_TOPIC = os.getenv('TELEMETRY_TOPIC', "iot/telemetry")
 USER_DEVICE_SERVICE_URL = os.getenv('USER_DEVICE_SERVICE_URL', "http://localhost:8088/api/v1/devices")
 PUBLISH_INTERVAL = int(os.getenv('PUBLISH_INTERVAL', "5"))
 
@@ -206,7 +206,7 @@ def flush_telemetry_buffer():
     success_count = 0
 
     for item in telemetry_buffer[:]:
-        result = mqtt_client.publish(TELEMETRY_TOPIC, item['payload'], qos=1)
+        result = mqtt_client.publish(f"{TELEMETRY_TOPIC}/{device_id}", item['payload'], qos=1)
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
             success_count += 1
         time.sleep(0.1)
@@ -332,7 +332,7 @@ def on_message(client, userdata, msg):
             value = float(val)
 
             # Validation
-            if not (MIN_TEMP <= val <= MAX_TEMP):
+            if not (MIN_TEMP <= value <= MAX_TEMP):
                 logger.warning(f"Invalid temp: {val}°C (range: {MIN_TEMP}-{MAX_TEMP})")
                 return
 
@@ -508,8 +508,10 @@ def main_loop():
             # Send or buffer telemetry
             payload = generate_telemetry_payload()
 
+            topic = f"{TELEMETRY_TOPIC}/{device_id}"
+
             if connected_to_mqtt:
-                result = mqtt_client.publish(TELEMETRY_TOPIC, payload, qos=1)
+                result = mqtt_client.publish(topic, payload, qos=1)
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
                     telemetry_count += 1
                     if telemetry_count % 12 == 0:

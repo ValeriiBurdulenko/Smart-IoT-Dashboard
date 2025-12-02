@@ -96,7 +96,7 @@ public class MqttIntegrationConfig {
     public MessageHandler mqttOutboundHandler() {
         MqttPahoMessageHandler messageHandler =
                 new MqttPahoMessageHandler(mqttClientIdOutbound + "-" + System.currentTimeMillis(), mqttClientFactory());
-        messageHandler.setAsync(true);
+        messageHandler.setAsync(false);
         messageHandler.setDefaultQos(1);
         return messageHandler;
     }

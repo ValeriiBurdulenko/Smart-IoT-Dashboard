@@ -5,6 +5,7 @@ import dashboard.com.smart_iot_dashboard.exception.DeviceNotFoundException;
 import dashboard.com.smart_iot_dashboard.service.DeviceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -51,6 +52,20 @@ public class DeviceCommandController {
         List<DeviceDTO> devices = deviceService.findAllDevicesByUserIdAndIsActiveTrue(userId);
 
         return ResponseEntity.ok(devices);
+    }
+
+    @GetMapping("/{deviceId}")
+    public ResponseEntity<DeviceDTO> getDeviceById(
+            @PathVariable String deviceId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String userId = jwt.getSubject();
+
+        log.debug("Fetching device {} for user '{}'", deviceId, userId);
+
+        DeviceDTO device = deviceService.findDeviceByIdAndUser(deviceId, userId);
+
+        return ResponseEntity.ok(device);
     }
 
     @PatchMapping("/{deviceId}")
@@ -112,9 +127,9 @@ public class DeviceCommandController {
         } catch (DeviceNotFoundException e) {
             log.warn("Device not found: {}", deviceId);
             return ResponseEntity.notFound().build();
-        } catch (Exception e) {
-            log.error("Internal error setting temp for device '{}'", deviceId, e);
-            return ResponseEntity.internalServerError().build();
+        } catch (RuntimeException e) {
+            log.error("Failed to set temperature: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         }
     }
 }

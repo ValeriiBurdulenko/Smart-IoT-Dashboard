@@ -28,9 +28,14 @@ public class DeviceService {
     public boolean deleteDeviceByUser(String deviceId, String userId) {
         return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
                 .map(device -> {
-                    String confirmCode = device.getDeviceId().substring(0, 8);
-
-                    sendMqttCommand(device.getDeviceId(), "reset_device", confirmCode, 1, false);
+                    try {
+                        String confirmCode = device.getDeviceId().substring(0, 8);
+                        sendMqttCommand(device.getDeviceId(), "reset_device", confirmCode, 1, false);
+                    } catch (Exception e) {
+                        // Log, but do NOT interrupt deletion.
+                        // If the device is offline, it will still be deleted from the database.
+                        log.warn("Kill switch failed for device {} (likely offline). Proceeding with DB deletion.", deviceId);
+                    }
 
                     device.setActive(false);
                     device.setDeactivatedAt(Instant.now());
@@ -57,7 +62,7 @@ public class DeviceService {
         sendMqttCommand(device.getDeviceId(), "set_target_temp", newTemp, 1, true);
     }
 
-    @Transactional(readOnly = true) // readOnly = true ist eine gute Optimierung für GET
+    @Transactional(readOnly = true)
     public List<DeviceDTO> findAllDevicesByUserIdAndIsActiveTrue(String userId) {
 
         // 1. Hole die Entities aus der DB
@@ -67,6 +72,13 @@ public class DeviceService {
         return devices.stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public DeviceDTO findDeviceByIdAndUser(String deviceId, String userId) {
+        return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
+                .map(this::convertToDTO)
+                .orElseThrow(() -> new DeviceNotFoundException("Device not found: " + deviceId));
     }
 
     @Transactional
@@ -133,9 +145,8 @@ public class DeviceService {
             mqttGateway.sendCommand(payload, topic, qos, retained);
 
         } catch (Exception e) {
-            // Protokollieren, aber das Löschen NICHT unterbrechen.
-            // Wenn das Gerät offline ist, wird es trotzdem aus der Datenbank gelöscht oder Command wird gesendet.
             log.warn("Failed to send MQTT command '{}' to device {}: {}", commandName, deviceId, e.getMessage());
+            throw new RuntimeException("MQTT Broker unavailable: " + e.getMessage(), e);
         }
     }
 }

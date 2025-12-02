@@ -32,7 +32,7 @@ build/
 ### VS Code ###
 .vscode/
 
-/.venv/
+.venv/
 /Keycloak/keycloak-26.4.0/*
 !/Keycloak/keycloak-26.4.0/themes
 
@@ -43,4 +43,4 @@ certs/*.key
 
 *.log
 *.properties
-credentials_*.json
+credentials_*.enc
