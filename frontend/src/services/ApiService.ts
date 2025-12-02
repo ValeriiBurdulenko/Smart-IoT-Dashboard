@@ -48,4 +48,16 @@ export const generateClaimCode = (): Promise<{ claimCode: string }> => {
     return apiClient.post('/devices/generate-claim-code').then(res => res.data);
 };
 
+export const getDeviceById = (deviceId: string): Promise<Device> => {
+    return apiClient.get(`/devices/${deviceId}`).then(res => res.data);
+};
+
+export const updateDeviceName = (deviceId: string, name: string): Promise<Device> => {
+    return apiClient.patch(`/devices/${deviceId}`, { name }).then(res => res.data);
+};
+
+export const sendTemperatureCommand = (deviceId: string, value: number): Promise<void> => {
+    return apiClient.post(`/devices/${deviceId}/command/temperature`, { value });
+};
+
 export default apiClient;
