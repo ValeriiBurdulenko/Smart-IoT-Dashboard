@@ -1,317 +1,489 @@
 package data_processing.com.flink;
 
-import com.influxdb.client.DeleteApi;
-import data_processing.com.flink.model.SensorData;
-import data_processing.com.flink.model.TelemetryEvent;
-import data_processing.com.flink.model.DeviceDeleteEvent;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.influxdb.client.DeleteApi;
 import com.influxdb.client.InfluxDBClient;
 import com.influxdb.client.InfluxDBClientFactory;
 import com.influxdb.client.WriteApiBlocking;
 import com.influxdb.client.domain.WritePrecision;
 import com.influxdb.client.write.Point;
+import data_processing.com.flink.model.DeviceDeleteEvent;
+import data_processing.com.flink.model.TelemetryEvent;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.common.time.Time;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
+import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.util.Collector;
+import org.apache.flink.util.OutputTag;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Collections;
+import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Production-ready Flink job for IoT data processing.
+ * Clean version: Validation -> InfluxDB -> Kafka Processed.
+ */
 public class DataProcessingJob {
 
-    // --- Schlüssel für die Konfigurationsdatei ---
-    private static final String KAFKA_BROKERS_KEY = "kafka.brokers";
-    private static final String KAFKA_SOURCE_TOPIC_KEY = "kafka.topic.raw";
-    private static final String KAFKA_SINK_TOPIC_KEY = "kafka.topic.processed";
-    private static final String KAFKA_GROUP_ID_KEY_PROCESSED = "kafka.group.id.processed";
-    private static final String INFLUXDB_URL_KEY = "influxdb.url";
-    private static final String INFLUXDB_TOKEN_KEY = "influxdb.token";
-    private static final String INFLUXDB_ORG_KEY = "influxdb.org";
-    private static final String INFLUXDB_BUCKET_KEY = "influxdb.bucket";
-    private static final String KAFKA_DELETE_TOPIC_KEY = "kafka.topic.deletions";
-    private static final String KAFKA_GROUP_ID_KEY_DELETIONS = "kafka.group.id.deletions";
+    private static final Logger LOG = LoggerFactory.getLogger(DataProcessingJob.class);
+
+    // --- Config Keys ---
+    private static final String KAFKA_BROKERS = "kafka.brokers";
+    private static final String KAFKA_TOPIC_RAW = "kafka.topic.raw";
+    private static final String KAFKA_TOPIC_PROCESSED = "kafka.topic.processed";
+    private static final String KAFKA_TOPIC_DELETIONS = "kafka.topic.deletions";
+    private static final String KAFKA_TOPIC_DLQ = "kafka.topic.dlq";
+
+    private static final String KAFKA_GROUP_ID_TELEMETRY = "kafka.group.id.telemetry";
+    private static final String KAFKA_GROUP_ID_DELETIONS = "kafka.group.id.deletions";
+
+    private static final String INFLUX_URL = "influxdb.url";
+    private static final String INFLUX_TOKEN = "influxdb.token";
+    private static final String INFLUX_ORG = "influxdb.org";
+    private static final String INFLUX_BUCKET = "influxdb.bucket";
+
+    private static final String CHECKPOINT_STORAGE = "checkpoint.storage.path";
+    private static final String KEY_SECURITY_PROTOCOL = "security.protocol";
+    private static final String KEY_SASL_MECHANISM = "sasl.mechanism";
+    private static final String KEY_SASL_JAAS_CONFIG = "sasl.jaas.config";
+
+    // Side output tags
+    private static final OutputTag<String> INVALID_EVENTS_TAG = new OutputTag<String>("invalid-events"){};
 
     public static void main(String[] args) throws Exception {
 
-        // --- 1. Konfiguration laden ---
         ParameterTool params;
-        try (InputStream propertiesStream = DataProcessingJob.class.getClassLoader().getResourceAsStream("flink.properties")) {
-            if (propertiesStream == null) {
-                System.err.println("!!! 'flink.properties' not found in resources!");
-                return;
-            }
-            // Lädt aus Datei UND überschreibt mit --arg Argumenten, falls vorhanden
-            params = ParameterTool.fromPropertiesFile(propertiesStream)
-                    .mergeWith(ParameterTool.fromArgs(args));
-        } catch (Exception e) {
-            System.err.println("Failed to load properties: " + e.getMessage());
-            return;
+        try (InputStream input = DataProcessingJob.class.getClassLoader()
+                .getResourceAsStream("flink.properties")) {
+            if (input == null) throw new FileNotFoundException("'flink.properties' file not found in classpath");
+            params = ParameterTool.fromPropertiesFile(input).mergeWith(ParameterTool.fromArgs(args));
         }
+
+        LOG.info("=== Starting IoT Data Processing Job (Clean) ===");
 
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        // --- 2. Quelle: Kafka (rohe Telemetrie) ---
-        KafkaSource<String> source = KafkaSource.<String>builder()
-                .setBootstrapServers(params.getRequired(KAFKA_BROKERS_KEY))
-                .setTopics(params.getRequired(KAFKA_SOURCE_TOPIC_KEY))
-                .setGroupId(params.get(KAFKA_GROUP_ID_KEY_PROCESSED, "flink-processor-group"))
-                .setStartingOffsets(OffsetsInitializer.latest())
+        // --- 1. Reliability Settings ---
+        env.getConfig().setGlobalJobParameters(params);
+
+        env.getConfig().enableObjectReuse();
+
+        // Checkpointing
+        env.enableCheckpointing(60000);
+        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+        env.getCheckpointConfig().setCheckpointStorage(params.get(CHECKPOINT_STORAGE, "file:///tmp/flink-checkpoints"));
+        env.getCheckpointConfig().setExternalizedCheckpointCleanup(CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
+
+        // Restart Strategy
+        env.setRestartStrategy(RestartStrategies.exponentialDelayRestart(
+                Time.seconds(2), Time.seconds(60), 1.5, Time.minutes(10), 0.1
+        ));
+
+        if (params.has("flink.parallelism")) {
+            env.setParallelism(params.getInt("flink.parallelism"));
+        }
+
+        Properties kafkaProps = createKafkaProperties(params);
+
+        // ==========================================
+        // PIPELINE 1: TELEMETRY (Validation -> DB -> Kafka)
+        // ==========================================
+
+        KafkaSource<String> telemetrySource = KafkaSource.<String>builder()
+                .setProperties(kafkaProps)
+                .setTopics(params.getRequired(KAFKA_TOPIC_RAW))
+                .setGroupId(params.get(KAFKA_GROUP_ID_TELEMETRY, "flink-telemetry-group"))
+                .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 
-        DataStream<String> kafkaStream = env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source");
+        DataStream<String> rawTelemetryStream = env.fromSource(
+                telemetrySource, WatermarkStrategy.noWatermarks(), "Telemetry Source"
+        );
 
-        // --- 3. Transformation: JSON -> POJO -> Validierung ---
-        DataStream<TelemetryEvent> validatedStream = kafkaStream
-                .map(new JsonToPojoMapper())
-                .filter(event -> event != null && event.isValid())
-                .name("Validate & Parse");
+        // Step 1: Validate JSON
+        SingleOutputStreamOperator<TelemetryEvent> validatedStream = rawTelemetryStream
+                .process(new TelemetryValidator())
+                .name("Validate JSON");
 
-        // --- 4. Sink 1: InfluxDB (für Grafiken) ---
-        AsyncDataStream
-                .unorderedWait(
-                        validatedStream,
-                        new InfluxDbSinkFunction(params),
-                        2000, TimeUnit.MILLISECONDS, 100
-                )
-                .name("InfluxDB Sink");
+        // Step 2: Handle Invalid Data (DLQ)
+        KafkaSink<String> dlqSink = createKafkaSink(params.get(KAFKA_TOPIC_DLQ, "iot-telemetry-dlq"), kafkaProps);
+        validatedStream.getSideOutput(INVALID_EVENTS_TAG).sinkTo(dlqSink).name("DLQ Sink");
 
-        // --- 5. Sink 2: Kafka (verarbeitete Daten für WebSockets) ---
-        KafkaSink<String> kafkaSink = KafkaSink.<String>builder()
-                .setBootstrapServers(params.getRequired(KAFKA_BROKERS_KEY))
-                .setRecordSerializer(KafkaRecordSerializationSchema.builder()
-                        .setTopic(params.getRequired(KAFKA_SINK_TOPIC_KEY))
-                        .setValueSerializationSchema(new SimpleStringSchema())
-                        .build())
+        // Step 3: Write to InfluxDB (Async, Non-blocking)
+        AsyncDataStream.unorderedWait(
+                validatedStream,
+                new InfluxDbSinkFunction(params),
+                5000, TimeUnit.MILLISECONDS,
+                20 // Concurrent requests
+        ).name("InfluxDB Writer");
+
+        // Step 4: Forward to Processed Topic (for Frontend/WebSocket)
+        KafkaSink<String> processedSink = KafkaSink.<String>builder()
+                .setKafkaProducerConfig(kafkaProps)
+                .setRecordSerializer(new KafkaRecordSerializationSchema<String>() {
+                    @Nullable
+                    @Override
+                    public ProducerRecord<byte[], byte[]> serialize(String element, KafkaSinkContext context, Long timestamp) {
+                        try {
+                            ObjectMapper mapper = new ObjectMapper();
+                            JsonNode node = mapper.readTree(element);
+                            String key = node.get("deviceId").asText();
+
+                            // [Image of Kafka Partition Keying]
+                            return new ProducerRecord<>(
+                                    params.getRequired(KAFKA_TOPIC_PROCESSED),
+                                    null,
+                                    timestamp,
+                                    key.getBytes(StandardCharsets.UTF_8),
+                                    element.getBytes(StandardCharsets.UTF_8)
+                            );
+                        } catch (Exception e) {
+                            LOG.error("Failed to serialize for Kafka: {}", element, e);
+                            return null;
+                        }
+                    }
+                })
                 .build();
 
         validatedStream
-                .map(new PojoToJsonMapper())
-                .sinkTo(kafkaSink).name("Processed Kafka Sink");
+                .map(new PojoToJsonMapper<>())
+                .sinkTo(processedSink)
+                .name("Kafka Processed Sink (Keyed)");
 
-        // --- CONVEYOR 2: PROCESSING DELETION REQUESTS ---
+        // ==========================================
+        // PIPELINE 2: DELETIONS (GDPR)
+        // ==========================================
 
-        // 2.1. Source: Reading the deletion topic
-        KafkaSource<String> deleteSource = KafkaSource.<String>builder()
-                .setBootstrapServers(params.getRequired(KAFKA_BROKERS_KEY))
-                .setTopics(params.getRequired(KAFKA_DELETE_TOPIC_KEY))
-                .setGroupId(params.get(KAFKA_GROUP_ID_KEY_DELETIONS,"flink-data-purger-group"))
-                .setStartingOffsets(OffsetsInitializer.latest())
+        KafkaSource<String> deletionSource = KafkaSource.<String>builder()
+                .setProperties(kafkaProps)
+                .setTopics(params.getRequired(KAFKA_TOPIC_DELETIONS))
+                .setGroupId(params.get(KAFKA_GROUP_ID_DELETIONS, "flink-purger-group"))
+                .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 
-        DataStream<String> deleteJsonStream = env.fromSource(deleteSource, WatermarkStrategy.noWatermarks(), "Deletion Source");
-
-        // 2.2. Transformation: JSON -> POJO -> Filtering
-        DataStream<DeviceDeleteEvent> deleteEventStream = deleteJsonStream
-                .map(new JsonToDeleteEventMapper())
-                .filter(event -> event != null && "PURGE".equals(event.getAction()))
-                .name("Parse & Validate Deletion Event");
-
-        // 2.3. Sink 3: Receiver for deletion from InfluxDB
-        AsyncDataStream
-                .unorderedWait(
-                        deleteEventStream,
-                        new InfluxDbDeleteSink(params),
-                        60000, TimeUnit.MILLISECONDS, 10
+        DataStream<DeviceDeleteEvent> deletionStream = env.fromSource(
+                        deletionSource, WatermarkStrategy.noWatermarks(), "Deletion Source"
                 )
-                .name("InfluxDB Delete Sink");
+                .map(new JsonToPojoMapper<>(DeviceDeleteEvent.class))
+                .filter(e -> e != null && "PURGE".equals(e.getAction()));
 
+        AsyncDataStream.unorderedWait(
+                deletionStream,
+                new InfluxDbDeleteSink(params),
+                10000, TimeUnit.MILLISECONDS,
+                5
+        ).name("InfluxDB Purge");
 
-        // --- Start all conveyors ---
-        env.execute("IoT Data Pipeline (Processing & Deletion)");
+        env.execute("IoT Data Processing Pipeline");
     }
 
-    // --- Hilfsklassen für Flink ---
+    // --- Helpers ---
+    private static Properties createKafkaProperties(ParameterTool params) {
+        Properties props = new Properties();
+        props.setProperty("bootstrap.servers", params.getRequired(KAFKA_BROKERS));
+
+        if (params.has(KEY_SECURITY_PROTOCOL)) {
+            props.setProperty(KEY_SECURITY_PROTOCOL, params.get(KEY_SECURITY_PROTOCOL));
+        }
+
+        if (params.has(KEY_SASL_MECHANISM)) {
+            props.setProperty(KEY_SASL_MECHANISM, params.get(KEY_SASL_MECHANISM));
+        }
+
+        if (params.has(KEY_SASL_JAAS_CONFIG)) {
+            props.setProperty(KEY_SASL_JAAS_CONFIG, params.get(KEY_SASL_JAAS_CONFIG));
+        }
+        return props;
+    }
+
+    private static KafkaSink<String> createKafkaSink(String topic, Properties props) {
+        return KafkaSink.<String>builder()
+                .setKafkaProducerConfig(props)
+                .setRecordSerializer(KafkaRecordSerializationSchema.builder()
+                        .setTopic(topic)
+                        .setValueSerializationSchema(new SimpleStringSchema())
+                        .build())
+                .build();
+    }
+
+    // --- Functions ---
 
     /**
-     * Konvertiert JSON-String in TelemetryEvent POJO
+     * Simply validates JSON. If invalid -> DLQ. If OK -> proceed.
      */
-    public static class JsonToPojoMapper extends RichMapFunction<String, TelemetryEvent> {
+    public static class TelemetryValidator extends ProcessFunction<String, TelemetryEvent> {
         private transient ObjectMapper objectMapper;
+        private transient Counter validCounter;
+        private transient Counter invalidCounter;
 
         @Override
         public void open(Configuration parameters) {
             objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+            validCounter = getRuntimeContext().getMetricGroup().counter("telemetry_valid");
+            invalidCounter = getRuntimeContext().getMetricGroup().counter("telemetry_invalid");
         }
 
         @Override
-        public TelemetryEvent map(String value) {
+        public void processElement(String value, Context ctx, Collector<TelemetryEvent> out) {
             try {
-                return objectMapper.readValue(value, TelemetryEvent.class);
+                TelemetryEvent event = objectMapper.readValue(value, TelemetryEvent.class);
+
+                if (event == null || !event.isValid()) {
+                    invalidCounter.inc();
+                    ctx.output(INVALID_EVENTS_TAG, value);
+                    return;
+                }
+
+                validCounter.inc();
+                out.collect(event);
+
             } catch (Exception e) {
-                System.err.println("Failed to parse JSON: " + value);
-                return null; // Wird später von .filter() entfernt
+                invalidCounter.inc();
+                ctx.output(INVALID_EVENTS_TAG, value);
             }
         }
     }
 
     /**
-     * Konvertiert TelemetryEvent POJO zurück in JSON-String
-     */
-    public static class PojoToJsonMapper extends RichMapFunction<TelemetryEvent, String> {
-        private transient ObjectMapper objectMapper;
-
-        @Override
-        public void open(Configuration parameters) {
-            objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        }
-
-        @Override
-        public String map(TelemetryEvent value) throws Exception {
-            return objectMapper.writeValueAsString(value);
-        }
-    }
-
-    /**
-     * Schreibt Telemetriedaten asynchron in InfluxDB
+     * Writes to InfluxDB asynchronously using a dedicated thread pool.
+     * Closes resources correctly.
      */
     public static class InfluxDbSinkFunction extends RichAsyncFunction<TelemetryEvent, Void> {
-        private transient InfluxDBClient influxDBClient;
+        private transient InfluxDBClient client;
         private transient WriteApiBlocking writeApi;
-
+        private transient ExecutorService executor;
         private final ParameterTool params;
-        private String influxOrg;
-        private String influxBucket;
+        private transient Counter successCounter;
+        private transient Counter failureCounter;
 
-        public InfluxDbSinkFunction(ParameterTool params) {
-            this.params = params;
-        }
+        public InfluxDbSinkFunction(ParameterTool params) { this.params = params; }
 
         @Override
         public void open(Configuration parameters) {
-            // Liest Parameter
-            String influxUrl = params.getRequired(INFLUXDB_URL_KEY);
-            String influxToken = params.getRequired(INFLUXDB_TOKEN_KEY);
-            this.influxOrg = params.getRequired(INFLUXDB_ORG_KEY);
-            this.influxBucket = params.getRequired(INFLUXDB_BUCKET_KEY);
+            String url = params.getRequired(INFLUX_URL);
+            String token = params.getRequired(INFLUX_TOKEN);
+            String org = params.getRequired(INFLUX_ORG);
+            String bucket = params.getRequired(INFLUX_BUCKET);
 
-            influxDBClient = InfluxDBClientFactory.create(influxUrl, influxToken.toCharArray(), influxOrg, influxBucket);
-            writeApi = influxDBClient.getWriteApiBlocking();
+            client = InfluxDBClientFactory.create(url, token.toCharArray(), org, bucket);
+            writeApi = client.getWriteApiBlocking();
+            executor = Executors.newFixedThreadPool(20);
+
+            successCounter = getRuntimeContext().getMetricGroup().counter("influx_writes_success");
+            failureCounter = getRuntimeContext().getMetricGroup().counter("influx_writes_failed");
         }
 
         @Override
         public void close() {
-            if (influxDBClient != null) {
-                influxDBClient.close();
+            if (executor != null) {
+                executor.shutdown();
+                try {
+                    if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                        LOG.warn("Executor did not terminate gracefully, forcing shutdown");
+                        executor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    executor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
             }
+            if (client != null) client.close();
         }
 
         @Override
         public void asyncInvoke(TelemetryEvent event, ResultFuture<Void> resultFuture) {
-            try {
-                Point point = Point.measurement("telemetry")
-                        .addTag("deviceId", event.getDeviceId())
-                        .addField("currentTemperature", event.data.currentTemperature)
-                        .addField("targetTemperature", event.data.targetTemperature)
-                        .addField("heatingStatus", event.data.heatingStatus ? 1 : 0)
-                        .time(event.getTimestamp(), WritePrecision.MS);
+            CompletableFuture.runAsync(() -> writeWithRetry(event, resultFuture), executor);
+        }
 
-                writeApi.writePoint(point);
-                resultFuture.complete(Collections.emptyList());
-            } catch (Exception e) {
-                System.err.println("Failed to write to InfluxDB: " + e.getMessage());
-                resultFuture.completeExceptionally(e);
+        private void writeWithRetry(TelemetryEvent event, ResultFuture<Void> resultFuture) {
+            Point point = createTelemetryPoint(event);
+            int maxRetries = 3;
+
+            for (int attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    writeApi.writePoint(point);
+                    successCounter.inc();
+                    resultFuture.complete(Collections.emptyList());
+                    return;
+                } catch (Exception e) {
+                    if (isLastAttempt(attempt, maxRetries)) {
+                        failureCounter.inc();
+                        LOG.error("Failed to write to InfluxDB after {} attempts", maxRetries, e);
+                        resultFuture.completeExceptionally(e);
+                    } else {
+                        performBackoff(attempt);
+                    }
+                }
             }
         }
 
-        @Override
-        public void timeout(TelemetryEvent input, ResultFuture<Void> resultFuture) {
-            resultFuture.completeExceptionally(new RuntimeException("InfluxDB write timeout for: " + input.getDeviceId()));
+        private Point createTelemetryPoint(TelemetryEvent event) {
+            int heatingStatus = Boolean.TRUE.equals(event.getData().getHeatingStatus()) ? 1 : 0;
+
+            Point point = Point.measurement("telemetry")
+                    .addTag("deviceId", event.getDeviceId())
+                    .addField("currentTemperature", event.getData().getCurrentTemperature())
+                    .addField("heatingStatus", heatingStatus)
+                    .time(event.getTimestamp(), WritePrecision.MS);
+
+            if (event.getData().getTargetTemperature() != null) {
+                point.addField("targetTemperature", event.getData().getTargetTemperature());
+            }
+
+            return point;
+        }
+
+        private void performBackoff(int attempt) {
+            try {
+                Thread.sleep(200L * (attempt + 1));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        private boolean isLastAttempt(int attempt, int maxRetries) {
+            return attempt == maxRetries - 1;
         }
     }
 
     /**
-     * Converts a JSON delete string into a POJO DeviceDeleteEvent
+     * Deletes data from InfluxDB upon request (GDPR).
      */
-    public static class JsonToDeleteEventMapper extends RichMapFunction<String, DeviceDeleteEvent> {
-        private transient ObjectMapper objectMapper;
+    public static class InfluxDbDeleteSink extends RichAsyncFunction<DeviceDeleteEvent, Void> {
+        private transient InfluxDBClient client;
+        private transient DeleteApi deleteApi;
+        private transient ExecutorService executor;
+        private final ParameterTool params;
 
-        @Override
-        public void open(Configuration parameters) {
-            objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        public InfluxDbDeleteSink(ParameterTool params) { this.params = params; }
+
+        @Override public void open(Configuration c) {
+            String url = params.getRequired(INFLUX_URL);
+            String token = params.getRequired(INFLUX_TOKEN);
+            String org = params.getRequired(INFLUX_ORG);
+            String bucket = params.getRequired(INFLUX_BUCKET);
+
+            client = InfluxDBClientFactory.create(url, token.toCharArray(), org, bucket);
+            deleteApi = client.getDeleteApi();
+            executor = Executors.newFixedThreadPool(5);
         }
 
-        @Override
-        public DeviceDeleteEvent map(String value) {
-            try {
-                return objectMapper.readValue(value, DeviceDeleteEvent.class);
-            } catch (Exception e) {
-                System.err.println("Failed to parse delete event: " + value);
-                return null;
+        @Override public void close() {
+            if (executor != null) {
+                executor.shutdown();
+                try {
+                    if (!executor.awaitTermination(10, TimeUnit.SECONDS)) executor.shutdownNow();
+                } catch (InterruptedException e) {
+                    executor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
             }
+            if(client!=null) client.close();
+        }
+
+        @Override public void asyncInvoke(DeviceDeleteEvent event, ResultFuture<Void> result) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    String sanitizedId = sanitizeDeviceId(event.getDeviceId());
+                    String predicate = String.format("_measurement=\"telemetry\" AND \"deviceId\"=\"%s\"", sanitizedId);
+                    String bucket = params.getRequired(INFLUX_BUCKET);
+                    String org = params.getRequired(INFLUX_ORG);
+                    deleteApi.delete(OffsetDateTime.parse("1970-01-01T00:00:00Z"), OffsetDateTime.now(), predicate, bucket, org);
+                    result.complete(Collections.emptyList());
+                } catch (Exception e) {
+                    result.completeExceptionally(e);
+                }
+            }, executor);
+        }
+
+        private String sanitizeDeviceId(String deviceId) {
+            if (deviceId == null) {
+                throw new IllegalArgumentException("Device ID cannot be null");
+            }
+
+            //Security Check: Null Byte Injection
+            deviceId = deviceId.replace("\0", "");
+
+            if (!deviceId.matches("^[a-zA-Z0-9_\\-:.]+$")) {
+                throw new SecurityException("Potential SQL Injection detected: invalid characters in deviceId");
+            }
+
+            return deviceId
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"");
         }
     }
 
-    // --- NEW SINK CLASS FOR REMOVAL ---
-    public static class InfluxDbDeleteSink extends RichAsyncFunction<DeviceDeleteEvent, Void> {
-
-        private transient InfluxDBClient influxDBClient;
-        private transient DeleteApi deleteApi;
-
-        private final ParameterTool params;
-        private String influxOrg;
-        private String influxBucket;
-
-        public InfluxDbDeleteSink(ParameterTool params) {
-            this.params = params;
+    public static class JsonToPojoMapper<T> extends RichMapFunction<String, T> implements ResultTypeQueryable<T> {
+        private final Class<T> targetClass;
+        private transient ObjectMapper objectMapper;
+        public JsonToPojoMapper(Class<T> targetClass) {
+            this.targetClass = targetClass;
         }
 
-        @Override
-        public void open(Configuration parameters) {
-            String influxUrl = params.getRequired(INFLUXDB_URL_KEY);
-            String influxToken = params.getRequired(INFLUXDB_TOKEN_KEY);
-            this.influxOrg = params.getRequired(INFLUXDB_ORG_KEY);
-            this.influxBucket = params.getRequired(INFLUXDB_BUCKET_KEY);
-
-            influxDBClient = InfluxDBClientFactory.create(influxUrl, influxToken.toCharArray(), influxOrg, influxBucket);
-            deleteApi = influxDBClient.getDeleteApi();
+        @Override public void open(Configuration c) {
+            objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         }
 
-        @Override
-        public void close() {
-            if (influxDBClient != null) {
-                influxDBClient.close();
-            }
-        }
-
-        @Override
-        public void asyncInvoke(DeviceDeleteEvent event, ResultFuture<Void> resultFuture) {
-            String deviceId = event.getDeviceId();
+        @Override public T map(String value) {
             try {
-                System.out.println("!!! [PURGE JOB] Received command to delete InfluxDB data for: " + deviceId);
-
-                // 1. Delete ALL data for this deviceId
-                // (from 1970 to 2200 to cover everything)
-                OffsetDateTime start = OffsetDateTime.parse("1970-01-01T00:00:00Z");
-                OffsetDateTime stop = OffsetDateTime.parse("2200-01-01T00:00:00Z");
-
-                // 2. Predicate: delete from “telemetry” where “deviceId” = X
-                String predicate = String.format("_measurement=\"telemetry\" AND \"deviceId\"=\"%s\"", deviceId);
-
-                // 3. Perform deletion
-                deleteApi.delete(start, stop, predicate, influxBucket, influxOrg);
-
-                System.out.println("!!! [PURGE JOB] InfluxDB data for " + deviceId + " has been successfully deleted.");
-                resultFuture.complete(Collections.emptyList());
+                return objectMapper.readValue(value, targetClass);
             } catch (Exception e) {
-                System.err.println("!!! [PURGE JOB] Error while deleting InfluxDB data: " + e.getMessage());
-                resultFuture.completeExceptionally(e);
-            }
+                return null; }
+        }
+
+        @Override
+        public TypeInformation<T> getProducedType() {
+            return TypeInformation.of(targetClass);
+        }
+    }
+
+    public static class PojoToJsonMapper<T> extends RichMapFunction<T, String> {
+        private transient ObjectMapper objectMapper;
+        @Override public void open(Configuration c) {
+            objectMapper = new ObjectMapper()
+                    .registerModule(new JavaTimeModule())
+                    .configure(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        }
+
+        @Override public String map(T value) throws Exception {
+            return objectMapper.writeValueAsString(value);
         }
     }
 }
