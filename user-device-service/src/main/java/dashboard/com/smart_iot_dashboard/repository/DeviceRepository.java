@@ -22,6 +22,10 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
 
     Optional<Device> findByDeviceId(String deviceId);
 
+    boolean existsByDeviceIdAndUserIdAndIsActiveTrue(String deviceId, String userId);
+
+    boolean existsByDeviceIdAndIsActiveTrue(String deviceId);
+
     @Modifying
     @Query("UPDATE Device d SET d.isActive = false, d.deactivatedAt = :deactivatedAt WHERE d.userId = :userId AND d.isActive = true")
     int deactivateDevicesByUserId(@Param("userId") String userId, @Param("deactivatedAt") Instant deactivatedAt);

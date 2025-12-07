@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
@@ -6,8 +6,16 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import DevicesPage from './pages/DevicesPage';
 import DeviceDetailPage from './pages/DeviceDetailPage';
+import WebSocketService from './services/WebSocketService';
 
 const App: React.FC = () => {
+    useEffect(() => {
+        WebSocketService.activate();
+
+        return () => {
+            WebSocketService.deactivate();
+        };
+    }, []);
     return (
         <Routes>
             <Route path="/login" element={<LoginPage />} />

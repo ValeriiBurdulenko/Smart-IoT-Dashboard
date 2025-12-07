@@ -3,6 +3,10 @@ import KeycloakService from './KeycloakService';
 
 import type { Device } from '../types';
 
+export interface HistoryPoint {
+    timestamp: string;
+    temperature: number;
+}
 
 const apiClient = axios.create({
     baseURL: import.meta.env.VITE_BACKEND_API_URL
@@ -58,6 +62,19 @@ export const updateDeviceName = (deviceId: string, name: string): Promise<Device
 
 export const sendTemperatureCommand = (deviceId: string, value: number): Promise<void> => {
     return apiClient.post(`/devices/${deviceId}/command/temperature`, { value });
+};
+
+export const getDeviceHistory = async (deviceId: string, range = '-1h'): Promise<HistoryPoint[]> => {
+    try {
+        const response = await apiClient.get<HistoryPoint[]>(`/devices/${deviceId}/telemetry/history`, {
+            params: { range }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Failed to fetch history:", error);
+        // Return an empty array so that the graph does not break the page with an error
+        return []; 
+    }
 };
 
 export default apiClient;

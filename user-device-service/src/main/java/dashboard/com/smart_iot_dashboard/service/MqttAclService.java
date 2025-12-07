@@ -52,9 +52,7 @@ public class MqttAclService {
     }
 
     private boolean checkForRegularDevice(String deviceId, Integer accessType, String topic){
-        boolean isActive = deviceRepository.findByDeviceIdAndIsActiveTrue(deviceId).isPresent();
-
-        if (!isActive) {
+        if (!deviceRepository.existsByDeviceIdAndIsActiveTrue(deviceId)) {
             log.warn("ACL Check: Device '{}' is not active or does not exist. Denying.", deviceId);
             return false;
         }

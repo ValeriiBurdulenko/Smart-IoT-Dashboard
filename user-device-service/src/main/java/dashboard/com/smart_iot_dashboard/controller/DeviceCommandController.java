@@ -63,7 +63,7 @@ public class DeviceCommandController {
 
         log.debug("Fetching device {} for user '{}'", deviceId, userId);
 
-        DeviceDTO device = deviceService.findDeviceByIdAndUser(deviceId, userId);
+        DeviceDTO device = deviceService.findDeviceByIdAndUserId(deviceId, userId);
 
         return ResponseEntity.ok(device);
     }

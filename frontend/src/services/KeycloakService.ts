@@ -23,6 +23,28 @@ const isLoggedIn = () => !!keycloak.token;
 const getUsername = () => keycloak.tokenParsed?.given_name || keycloak.tokenParsed?.preferred_username || "User";
 const getUserId = () => keycloak.subject;
 
+const updateToken = (minValidity = 70): Promise<boolean> => {
+    return keycloak.updateToken(minValidity)
+        .then((refreshed) => {
+            if (refreshed) {
+                console.debug('Token refreshed');
+            } else {
+                console.debug('Token still valid');
+            }
+            return true;
+        })
+        .catch(() => {
+            console.error('Failed to refresh token');
+            logout();
+            return false;
+        });
+};
+
+keycloak.onTokenExpired = () => {
+    console.log('Token expired event triggered');
+    updateToken(70).catch(() => logout());
+};
+
 const KeycloakService = {
     initKeycloak,
     login,
@@ -31,6 +53,7 @@ const KeycloakService = {
     isLoggedIn,
     getUsername,
     getUserId,
+    updateToken,
     keycloakInstance: keycloak
 };
 

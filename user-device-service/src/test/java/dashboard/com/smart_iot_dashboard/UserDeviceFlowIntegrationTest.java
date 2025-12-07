@@ -146,7 +146,9 @@ class UserDeviceFlowIntegrationTest {
         String expectedPayload = objectMapper.writeValueAsString(commandPayload);
         verify(mqttGateway).sendCommand(
                 eq(expectedPayload),
-                eq("devices/" + newDeviceId + "/commands")
+                eq("devices/" + newDeviceId + "/commands"),
+                eq(1),
+                eq(true)
         );
 
 

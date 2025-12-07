@@ -71,11 +71,11 @@ public class DeviceService {
         // 2. Konvertiere die Liste von Entities in eine Liste von DTOs
         return devices.stream()
                 .map(this::convertToDTO)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Transactional(readOnly = true)
-    public DeviceDTO findDeviceByIdAndUser(String deviceId, String userId) {
+    public DeviceDTO findDeviceByIdAndUserId(String deviceId, String userId) {
         return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
                 .map(this::convertToDTO)
                 .orElseThrow(() -> new DeviceNotFoundException("Device not found: " + deviceId));
@@ -90,6 +90,11 @@ public class DeviceService {
         Device saved = deviceRepository.save(device);
         log.info("Device {} name updated to '{}'", deviceId, newName);
         return convertToDTO(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isDeviceOwner(String deviceId, String userId) {
+        return deviceRepository.existsByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId);
     }
 
     private DeviceDTO convertToDTO(Device device) {
