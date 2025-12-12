@@ -19,6 +19,7 @@ $KAFKA_TOPIC --create --if-not-exists --topic iot-telemetry-raw --partitions 3 -
 $KAFKA_TOPIC --create --if-not-exists --topic iot-telemetry-processed --partitions 3 --replication-factor 1
 $KAFKA_TOPIC --create --if-not-exists --topic iot-device-deletions --partitions 1 --replication-factor 1 # Reihenfolge wichtog, deswegen 1 fur logs
 $KAFKA_TOPIC --create --if-not-exists --topic iot-commands --partitions 1 --replication-factor 1
+$KAFKA_TOPIC --create --if-not-exists --topic iot-telemetry-dlq --partitions 1 --replication-factor 1
 
 echo "📝 Applying ACLs..."
 
@@ -30,7 +31,7 @@ $KAFKA_ACL --add --allow-principal User:mqtt_kafka_bridge_user --operation Write
 # Can write in the deletion and commands thread
 $KAFKA_ACL --add --allow-principal User:user_device_service_user --operation Write --topic iot-device-deletions
 $KAFKA_ACL --add --allow-principal User:user_device_service_user --operation Write --topic iot-commands
-# (Optional) Can read processed data for the UI (if needed)
+# (Optional) Can read processed data for the UI
 $KAFKA_ACL --add --allow-principal User:user_device_service_user --operation Read --topic iot-telemetry-processed --group backend-group
 
 # --- 3. FLINK USER (Device Data Processing) ---
@@ -41,5 +42,6 @@ $KAFKA_ACL --add --allow-principal User:device_processing_service_user --operati
 # Writes processed data and commands
 $KAFKA_ACL --add --allow-principal User:device_processing_service_user --operation Write --topic iot-telemetry-processed
 $KAFKA_ACL --add --allow-principal User:device_processing_service_user --operation Write --topic iot-commands
+$KAFKA_ACL --add --allow-principal User:device_processing_service_user --operation Write --topic iot-telemetry-dlq
 
 echo "✅ Setup Complete!"
