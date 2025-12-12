@@ -50,13 +50,22 @@ MQTT_PORT_TLS = int(os.getenv('MQTT_BROKER_PORT_TLS', "8883"))
 MQTT_PORT = int(os.getenv('MQTT_BROKER_PORT', "1883"))
 MQTT_CA_CERT = os.getenv('MQTT_CA_CERT', "ca.crt")
 TELEMETRY_TOPIC = os.getenv('TELEMETRY_TOPIC', "iot/telemetry")
-USER_DEVICE_SERVICE_URL = os.getenv('USER_DEVICE_SERVICE_URL', "http://localhost:8088/api/v1/devices")
+USER_DEVICE_SERVICE_URL = os.getenv(
+    'USER_DEVICE_SERVICE_URL', "http://localhost:8088/api/v1/devices")
 PUBLISH_INTERVAL = int(os.getenv('PUBLISH_INTERVAL', "5"))
 
 # Buffer settings
 MAX_BUFFER_SIZE = int(os.getenv('MAX_BUFFER_SIZE', "100"))
 MIN_TEMP = float(os.getenv('MIN_TEMP', "-40.0"))
 MAX_TEMP = float(os.getenv('MAX_TEMP', "100.0"))
+
+# --- PHYSICS CONSTANTS ---
+AMBIENT_TEMP = round(random.uniform(15.0, 20.0), 1)
+HVAC_POWER = 3.0  # Power of active influence
+INSULATION = 0.02  # Heat loss coefficient
+DEADBAND = 0.5  # Hysteresis: +/- 1.5 degrees - idle zone
+# Inertia (how much the previous state affects the current one)
+INERTIA_FACTOR = 0.2
 
 # --- 2. Global Variables ---
 mqtt_client = None
@@ -74,16 +83,22 @@ logger = None
 telemetry_buffer = []
 
 # Simulation state
-current_temp = 22.0
+current_temp = AMBIENT_TEMP
 target_temp = None
 heating_on = False
 
+# Internal variable for inertia (accumulated heat/cold)
+thermal_momentum = 0.0
+
 # --- 3. Logging Setup ---
+
+
 class ContextFilter(logging.Filter):
     """
     This filter adds a ‘port’ field to ALL logs,
     including Flask and library system logs.
     """
+
     def filter(self, record):
         record.port = PROVISIONING_SERVER_PORT
         return True
@@ -95,10 +110,12 @@ def setup_logging():
     port_filter = ContextFilter()
 
     # Configure the formatter that expects %(port)s
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] [Port:%(port)s] %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] [Port:%(port)s] %(message)s')
 
     # 1. File Handler
-    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=5*1024*1024, backupCount=3, encoding='utf-8')
+    file_handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=5*1024*1024, backupCount=3, encoding='utf-8')
     file_handler.setFormatter(formatter)
     file_handler.addFilter(port_filter)
 
@@ -121,11 +138,14 @@ def setup_logging():
     return log
 
 # --- 4. Encryption for Credentials ---
+
+
 def get_encryption_key():
     """Generate device-specific encryption key"""
     device_seed = f"{PROVISIONING_SERVER_PORT}-{DEVICE_NAME_FOR_FILES}"
     key = hashlib.sha256(device_seed.encode()).digest()
     return base64.urlsafe_b64encode(key)
+
 
 def save_credentials_secure(credentials):
     """Save encrypted credentials"""
@@ -139,6 +159,7 @@ def save_credentials_secure(credentials):
         logger.error(f"Failed to save credentials: {e}")
         raise
 
+
 def load_credentials_secure():
     """Load and decrypt credentials"""
     try:
@@ -151,11 +172,13 @@ def load_credentials_secure():
         raise
 
 # --- 5. State Management ---
+
+
 def load_initial_state():
     """Load persistent settings from NVM"""
     global current_temp, target_temp, heating_on
 
-    current_temp = round(random.uniform(18.0, 23.0), 2)
+    current_temp = round(AMBIENT_TEMP + random.uniform(-1.0, 1.0), 2)
 
     if os.path.exists(STATE_FILE):
         try:
@@ -170,7 +193,9 @@ def load_initial_state():
         logger.info("No state file found. Waiting for commands.")
         target_temp = None
 
-    logger.info(f"Initial state: current={current_temp}°C, target={target_temp}°C, heating={heating_on}")
+    logger.info(
+        f"Initial state: current={current_temp}°C, target={target_temp}°C, heating={heating_on}")
+
 
 def save_current_state():
     """Save persistent settings to NVM"""
@@ -183,6 +208,8 @@ def save_current_state():
         logger.error(f"Error saving state: {e}")
 
 # --- 6. Telemetry Buffer ---
+
+
 def buffer_telemetry(payload):
     """Store telemetry when offline"""
     global telemetry_buffer
@@ -196,6 +223,7 @@ def buffer_telemetry(payload):
     if len(telemetry_buffer) % 10 == 0:
         logger.info(f"Buffer size: {len(telemetry_buffer)} messages")
 
+
 def flush_telemetry_buffer():
     """Send buffered data when reconnected"""
     global telemetry_buffer
@@ -206,13 +234,15 @@ def flush_telemetry_buffer():
     success_count = 0
 
     for item in telemetry_buffer[:]:
-        result = mqtt_client.publish(f"{TELEMETRY_TOPIC}/{device_id}", item['payload'], qos=1)
+        result = mqtt_client.publish(
+            f"{TELEMETRY_TOPIC}/{device_id}", item['payload'], qos=1)
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
             success_count += 1
         time.sleep(0.1)
 
     telemetry_buffer.clear()
     logger.info(f"Flushed {success_count} messages successfully")
+
 
 # --- 7. Provisioning Mode ---
 HTML_TEMPLATE = r"""
@@ -237,6 +267,7 @@ HTML_TEMPLATE = r"""
 </html>
 """
 
+
 @flask_app.route('/', methods=['GET', 'POST'])
 def provision_form():
     global flask_server
@@ -250,10 +281,12 @@ def provision_form():
 
             if response.status_code == 200:
                 credentials = response.json()
-                logger.info(f"Claimed! Device ID: {credentials.get('deviceId')}")
+                logger.info(
+                    f"Claimed! Device ID: {credentials.get('deviceId')}")
                 save_credentials_secure(credentials)
 
-                threading.Thread(target=lambda: flask_server.shutdown(), daemon=True).start()
+                threading.Thread(
+                    target=lambda: flask_server.shutdown(), daemon=True).start()
                 return "<h1>Success!</h1><p>Device claimed. Restarting...</p>"
             elif response.status_code == 404:
                 error = "Claim failed: Code not found or expired."
@@ -265,6 +298,7 @@ def provision_form():
 
     return render_template_string(HTML_TEMPLATE, error=error, port=PROVISIONING_SERVER_PORT)
 
+
 @flask_app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -275,13 +309,16 @@ def health_check():
     }
     return json.dumps(status), 200
 
+
 def run_flask_app():
     """Start Flask provisioning server"""
     global flask_server
     host_ip = '127.0.0.1'
-    logger.info(f"Starting provisioning server on http://{host_ip}:{PROVISIONING_SERVER_PORT}")
+    logger.info(
+        f"Starting provisioning server on http://{host_ip}:{PROVISIONING_SERVER_PORT}")
     flask_server = make_server(host_ip, PROVISIONING_SERVER_PORT, flask_app)
     flask_server.serve_forever()
+
 
 def provisioning_mode():
     """Run provisioning web server"""
@@ -290,6 +327,8 @@ def provisioning_mode():
     logger.info("Web server stopped. Restarting...")
 
 # --- 8. MQTT Callbacks ---
+
+
 def on_connect(client, userdata, flags, rc, properties):
     """Callback for MQTT connection"""
     global connected_to_mqtt
@@ -314,10 +353,12 @@ def on_connect(client, userdata, flags, rc, properties):
         }.get(rc, f"unknown error {rc}")
         logger.error(f"MQTT Connection Failed: {error_msg}")
 
+
 def on_disconnect(client, userdata, disconnect_flags, rc, properties):
     global connected_to_mqtt
     connected_to_mqtt = False
     logger.warning(f"MQTT Disconnected (Code: {rc})")
+
 
 def on_message(client, userdata, msg):
     """Process incoming commands"""
@@ -333,7 +374,8 @@ def on_message(client, userdata, msg):
 
             # Validation
             if not (MIN_TEMP <= value <= MAX_TEMP):
-                logger.warning(f"Invalid temp: {val}°C (range: {MIN_TEMP}-{MAX_TEMP})")
+                logger.warning(
+                    f"Invalid temp: {val}°C (range: {MIN_TEMP}-{MAX_TEMP})")
                 return
 
             target_temp = value
@@ -360,30 +402,106 @@ def on_message(client, userdata, msg):
         logger.error(f"Error processing command: {e}")
 
 # --- 9. Simulation ---
+
+
 def simulate_climate_control():
     """Simulate heating/cooling physics"""
-    global current_temp, heating_on
+    global current_temp, heating_on, thermal_momentum
 
-    if target_temp is None:
-        heating_on = False
-        return
+    # 1. Passive environmental impact
+    delta_ambient = AMBIENT_TEMP - current_temp
+    passive_loss = delta_ambient * INSULATION
 
-    if heating_on:
-        current_temp += random.uniform(0.3, 0.8)
-        if current_temp >= target_temp:
+    active_force = 0.0
+    current_damping = 0.1
+
+    if target_temp is not None:
+        is_heating_mode = target_temp > AMBIENT_TEMP
+        diff = target_temp - current_temp
+        dist = abs(diff)
+
+        # Mode check
+        if (is_heating_mode and diff > -DEADBAND) or (not is_heating_mode and diff < DEADBAND):
+
+            # Switch-on hysteresis
+            if not heating_on:
+                if dist > 0.5:
+                    heating_on = True
+            elif dist < 0.1:
+                heating_on = False
+
+            if heating_on:
+                # --- A. Adaptive power depending on conditions ---
+
+                # 1. Feed-Forward
+                # Power required to maintain the current temperature
+                maintenance_power = abs(passive_loss) / INERTIA_FACTOR
+                maintenance_power = min(maintenance_power, HVAC_POWER * 0.8)
+
+                # 2. Corrective power (depends on distance to target)
+                if dist > 3.0:
+                    correction_power = HVAC_POWER
+                elif dist > 1.5:
+                    correction_power = HVAC_POWER * \
+                        (0.5 + 0.5 * (dist - 1.5) / 1.5)
+                else:
+                    correction_power = HVAC_POWER * (dist / 3.0) ** 0.7
+
+                # Combination
+                total_power = maintenance_power + correction_power
+                total_power = min(total_power, HVAC_POWER)
+
+                # 3. We take into account inertia (thermal momentum)
+                momentum_magnitude = abs(thermal_momentum)
+
+                # Predicting the flight: where will we be in a few steps?
+                predicted_overshoot = current_temp + thermal_momentum * 5
+                predicted_error = abs(target_temp - predicted_overshoot)
+
+                if momentum_magnitude > 0.3:
+                    if predicted_error < dist:
+                        current_damping = 0.7
+                        total_power *= 0.2
+                    elif dist < 2.0:
+                        current_damping = 0.5
+                        total_power *= 0.4
+
+                if dist < 0.3:
+                    current_damping = 0.6
+                    total_power = min(total_power, HVAC_POWER * 0.15)
+
+                # 4. Protection against unproductive consumption
+                if dist < 0.2:
+                    total_power = min(total_power, HVAC_POWER * 0.3)
+
+                direction = 1.0 if diff > 0 else -1.0
+                active_force = total_power * direction
+        else:
             heating_on = False
     else:
-        current_temp -= random.uniform(0.1, 0.4)
-        if current_temp < target_temp - 0.5:
-            heating_on = True
+        heating_on = False
 
-    current_temp = round(current_temp + random.uniform(-0.1, 0.1), 2)
+    if not heating_on:
+        current_damping = 0.2
+
+    # 5. Physics with inertia
+    new_momentum = (thermal_momentum * (1.0 - current_damping)
+                    ) + (active_force * INERTIA_FACTOR)
+    new_momentum = max(-2.5, min(2.5, new_momentum))
+
+    thermal_momentum = new_momentum
+    current_temp += passive_loss + thermal_momentum
+
+    # 6. Noise
+    current_temp += random.uniform(-0.02, 0.02)
+    current_temp = round(current_temp, 2)
+
 
 def generate_telemetry_payload():
     """Generate telemetry JSON"""
     return json.dumps({
         "deviceId": device_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "data": {
             "currentTemperature": current_temp,
             "targetTemperature": target_temp,
@@ -392,6 +510,8 @@ def generate_telemetry_payload():
     })
 
 # --- 10. Factory Reset ---
+
+
 def perform_factory_reset():
     """Perform secure factory reset"""
     global mqtt_client
@@ -417,6 +537,8 @@ def perform_factory_reset():
     os.execv(sys.executable, ['python'] + sys.argv)
 
 # --- 11. MQTT Connection with Retry ---
+
+
 def connect_mqtt_with_retry(max_retries=5):
     """Connect to MQTT with exponential backoff"""
     retry_delay = 1
@@ -437,6 +559,8 @@ def connect_mqtt_with_retry(max_retries=5):
     return False
 
 # --- 12. Main Loop ---
+
+
 def main_loop():
     """Main device operation loop"""
     global mqtt_client, device_id, device_token, port_to_use
@@ -479,7 +603,8 @@ def main_loop():
     if MQTT_USE_TLS:
         port_to_use = MQTT_PORT_TLS
         if not os.path.exists(MQTT_CA_CERT):
-            logger.error(f"TLS Error: CA cert not found at '{os.path.abspath(MQTT_CA_CERT)}'")
+            logger.error(
+                f"TLS Error: CA cert not found at '{os.path.abspath(MQTT_CA_CERT)}'")
             sys.exit(1)
         try:
             mqtt_client.tls_set(
@@ -515,14 +640,16 @@ def main_loop():
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
                     telemetry_count += 1
                     if telemetry_count % 12 == 0:
-                        logger.info(f"[{PROVISIONING_SERVER_PORT}] Heartbeat: Still sending data ({payload})")
+                        logger.info(
+                            f"[{PROVISIONING_SERVER_PORT}] Heartbeat: Still sending data ({payload})")
                 else:
                     logger.warning(f"Failed to send telemetry: {result.rc}")
                     buffer_telemetry(payload)
             else:
                 buffer_telemetry(payload)
                 if telemetry_count % 12 == 0:
-                    logger.info(f"Offline: {current_temp}°C (buffered: {len(telemetry_buffer)}, Target: {target_temp})")
+                    logger.info(
+                        f"Offline: {current_temp}°C (buffered: {len(telemetry_buffer)}, Target: {target_temp})")
                 telemetry_count += 1
 
             # Wait with interrupt support
@@ -541,10 +668,13 @@ def main_loop():
         perform_factory_reset()
 
 # --- 13. Signal Handlers ---
+
+
 def signal_handler(sig, frame):
     """Handle graceful shutdown"""
     logger.info(f"Shutdown signal received ({sig})")
     shutdown_event.set()
+
 
 # --- 14. Entry Point ---
 if __name__ == "__main__":

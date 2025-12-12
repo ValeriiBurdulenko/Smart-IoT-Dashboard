@@ -52,6 +52,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Production-ready Flink job for IoT data processing.
@@ -81,6 +82,8 @@ public class DataProcessingJob {
     private static final String KEY_SASL_MECHANISM = "sasl.mechanism";
     private static final String KEY_SASL_JAAS_CONFIG = "sasl.jaas.config";
 
+    //Validation Constant
+    private static final Pattern UUID_PATTERN = Pattern.compile("^[0-9a-fA-F-]{36}$");
     // Side output tags
     private static final OutputTag<String> INVALID_EVENTS_TAG = new OutputTag<String>("invalid-events"){};
 
@@ -440,8 +443,8 @@ public class DataProcessingJob {
             //Security Check: Null Byte Injection
             deviceId = deviceId.replace("\0", "");
 
-            if (!deviceId.matches("^[a-zA-Z0-9_\\-:.]+$")) {
-                throw new SecurityException("Potential SQL Injection detected: invalid characters in deviceId");
+            if (!UUID_PATTERN.matcher(deviceId).matches()) {
+                throw new SecurityException("Potential SQL Injection detected: deviceId does not match expected UUID format");
             }
 
             return deviceId

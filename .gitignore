@@ -44,3 +44,4 @@ certs/*.key
 *.log
 *.properties
 credentials_*.enc
+state_*.json
