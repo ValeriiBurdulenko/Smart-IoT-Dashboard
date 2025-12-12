@@ -22,7 +22,7 @@ public class ProvisioningService {
 
     private final StringRedisTemplate redisTemplate;
     private final DeviceRepository deviceRepository;
-    private final PasswordEncoder deviceTokenEncoder;
+    private final PasswordEncoder passwordEncoderInternal;
 
     // You can configure the TTL in application.properties, e.g., claimcode.ttl-minutes=5
     @Value("${claimcode.ttl-minutes:5}")
@@ -59,7 +59,7 @@ public class ProvisioningService {
 
         String deviceId = UUID.randomUUID().toString();
         String deviceToken = generateSecureToken(32);
-        String hashedToken = deviceTokenEncoder.encode(deviceToken);
+        String hashedToken = passwordEncoderInternal.encode(deviceToken);
 
         Device device = new Device();
         device.setDeviceId(deviceId);

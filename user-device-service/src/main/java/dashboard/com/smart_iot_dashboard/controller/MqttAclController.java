@@ -1,9 +1,10 @@
 package dashboard.com.smart_iot_dashboard.controller;
 
 import dashboard.com.smart_iot_dashboard.dto.MqttAclRequest;
+import dashboard.com.smart_iot_dashboard.service.MqttAclService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,16 +18,15 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 public class MqttAclController {
 
-    @Value("${mqtt.bridge.username}")
-    private String bridgeUsername;
-
     private static final int MOSQ_ACL_READ = 1;
     private static final int MOSQ_ACL_WRITE = 2;
     private static final int MOSQ_ACL_SUBSCRIBE = 4;
 
+    private final MqttAclService aclService;
+
 
     @PostMapping("/acl")
-    public ResponseEntity<Void> checkMqttAcl(@RequestBody MqttAclRequest aclRequest) {
+    public ResponseEntity<Void> checkMqttAcl(@Valid @RequestBody MqttAclRequest aclRequest) {
         String deviceId = aclRequest.getUsername();
         String topic = aclRequest.getTopic();
         int accessType = aclRequest.getAcc();
@@ -34,33 +34,7 @@ public class MqttAclController {
         log.debug("MQTT ACL check request: DeviceId='{}', Topic='{}', AccessType='{}'",
                 deviceId, topic, mapAccessTypeToString(accessType));
 
-        boolean allowed = false;
-
-
-        // 1. CHECK FOR SYSTEM BRIDGE
-        if (bridgeUsername != null && bridgeUsername.equals(deviceId)) {
-            if ((accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) &&
-                    topic.equals("iot/telemetry/ingress")) {
-                allowed = true;
-            }
-        }
-        // 2. CHECK FOR REGULAR DEVICES
-        else {
-            String expectedTelemetryTopic = "iot/telemetry/ingress";
-            String expectedCommandTopic = "devices/" + deviceId + "/commands";
-
-            if (accessType == MOSQ_ACL_WRITE) {
-                if (topic.equals(expectedTelemetryTopic)) {
-                    allowed = true;
-                }
-            } else if (accessType == MOSQ_ACL_READ || accessType == MOSQ_ACL_SUBSCRIBE) {
-                if (topic.equals(expectedCommandTopic)) {
-                    allowed = true;
-                }
-            }
-        }
-
-        if (allowed) {
+        if (aclService.checkAcl(deviceId, accessType, topic)) {
             log.info("MQTT ACL allowed: DeviceId='{}', Topic='{}', AccessType='{}'",
                     deviceId, topic, mapAccessTypeToString(accessType));
             return ResponseEntity.ok().build();

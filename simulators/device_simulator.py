@@ -7,25 +7,65 @@ import threading
 import ssl
 import sys
 import random
+import signal
+import logging
+from logging.handlers import RotatingFileHandler
 from flask import Flask, request, render_template_string
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+from werkzeug.serving import make_server
+from cryptography.fernet import Fernet
+import base64
+import hashlib
+
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 
 # --- 1. Configuration ---
 load_dotenv()
 
-CREDENTIALS_FILE = os.getenv('CREDENTIALS_FILE', "credentials.json")
-STATE_FILE = "device_state.json"
+PROVISIONING_SERVER_PORT = 9090
+DEVICE_NAME_FOR_FILES = "default"
+
+if len(sys.argv) == 2:
+    try:
+        PROVISIONING_SERVER_PORT = int(sys.argv[1])
+        DEVICE_NAME_FOR_FILES = str(PROVISIONING_SERVER_PORT)
+    except ValueError:
+        print(f"Error: Port '{sys.argv[1]}' must be a number.")
+        sys.exit(1)
+
+# Unique files per device
+CREDENTIALS_FILE = f"credentials_{DEVICE_NAME_FOR_FILES}.enc"
+STATE_FILE = f"state_{DEVICE_NAME_FOR_FILES}.json"
+LOG_FILE = f"device_{DEVICE_NAME_FOR_FILES}.log"
 
 MQTT_BROKER_HOST = os.getenv('MQTT_BROKER_HOST', "localhost")
 MQTT_USE_TLS = os.getenv('MQTT_USE_TLS', 'false').lower() == 'true'
 MQTT_PORT_TLS = int(os.getenv('MQTT_BROKER_PORT_TLS', "8883"))
 MQTT_PORT = int(os.getenv('MQTT_BROKER_PORT', "1883"))
 MQTT_CA_CERT = os.getenv('MQTT_CA_CERT', "ca.crt")
-TELEMETRY_TOPIC = os.getenv('TELEMETRY_TOPIC', "iot/telemetry/ingress")
-PROVISIONING_SERVER_PORT = int(os.getenv('PROVISIONING_SERVER_PORT', "9090"))
-USER_DEVICE_SERVICE_URL = os.getenv('USER_DEVICE_SERVICE_URL', "http://localhost:8088/api/v1/devices")
+TELEMETRY_TOPIC = os.getenv('TELEMETRY_TOPIC', "iot/telemetry")
+USER_DEVICE_SERVICE_URL = os.getenv(
+    'USER_DEVICE_SERVICE_URL', "http://localhost:8088/api/v1/devices")
 PUBLISH_INTERVAL = int(os.getenv('PUBLISH_INTERVAL', "5"))
+
+# Buffer settings
+MAX_BUFFER_SIZE = int(os.getenv('MAX_BUFFER_SIZE', "100"))
+MIN_TEMP = float(os.getenv('MIN_TEMP', "-40.0"))
+MAX_TEMP = float(os.getenv('MAX_TEMP', "100.0"))
+
+# --- PHYSICS CONSTANTS ---
+AMBIENT_TEMP = round(random.uniform(15.0, 20.0), 1)
+HVAC_POWER = 3.0  # Power of active influence
+INSULATION = 0.02  # Heat loss coefficient
+DEADBAND = 0.5  # Hysteresis: +/- 1.5 degrees - idle zone
+# Inertia (how much the previous state affects the current one)
+INERTIA_FACTOR = 0.2
 
 # --- 2. Global Variables ---
 mqtt_client = None
@@ -33,76 +73,190 @@ device_id = None
 device_token = None
 connected_to_mqtt = False
 flask_app = Flask(__name__)
-provisioning_success = threading.Event()
+factory_reset_event = threading.Event()
+shutdown_event = threading.Event()
+flask_server = None
+start_time = time.time()
+logger = None
 
-# --- 3. Simulation State Variables ---
-current_temp = 22.0
-target_temp = 20.0
+# Telemetry buffer for offline mode
+telemetry_buffer = []
+
+# Simulation state
+current_temp = AMBIENT_TEMP
+target_temp = None
 heating_on = False
 
-def print_config():
-    """Prints the current configuration on startup."""
-    print("--- 🚀 Simulator Configuration ---")
-    print(f"MQTT Broker Host: {MQTT_BROKER_HOST} (TLS: {MQTT_USE_TLS})")
-    print(f"Backend API URL: {USER_DEVICE_SERVICE_URL}")
-    print(f"Telemetry Topic: {TELEMETRY_TOPIC}")
-    print(f"Publish Interval: {PUBLISH_INTERVAL}s")
-    print("-----------------------------------")
+# Internal variable for inertia (accumulated heat/cold)
+thermal_momentum = 0.0
 
-# --- 4. State Management (NVM) ---
+# --- 3. Logging Setup ---
+
+
+class ContextFilter(logging.Filter):
+    """
+    This filter adds a ‘port’ field to ALL logs,
+    including Flask and library system logs.
+    """
+
+    def filter(self, record):
+        record.port = PROVISIONING_SERVER_PORT
+        return True
+
+
+def setup_logging():
+    """Configure logging with rotation and context filter"""
+    # Creating a filter
+    port_filter = ContextFilter()
+
+    # Configure the formatter that expects %(port)s
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] [Port:%(port)s] %(message)s')
+
+    # 1. File Handler
+    file_handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=5*1024*1024, backupCount=3, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(port_filter)
+
+    # 2. Console Handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.addFilter(port_filter)
+
+    # 3. Root Logger
+    log = logging.getLogger()
+    log.setLevel(logging.INFO)
+
+    # We clear old handlers (so that they don't duplicate when restarting)
+    if log.hasHandlers():
+        log.handlers.clear()
+
+    log.addHandler(file_handler)
+    log.addHandler(console_handler)
+
+    return log
+
+# --- 4. Encryption for Credentials ---
+
+
+def get_encryption_key():
+    """Generate device-specific encryption key"""
+    device_seed = f"{PROVISIONING_SERVER_PORT}-{DEVICE_NAME_FOR_FILES}"
+    key = hashlib.sha256(device_seed.encode()).digest()
+    return base64.urlsafe_b64encode(key)
+
+
+def save_credentials_secure(credentials):
+    """Save encrypted credentials"""
+    try:
+        fernet = Fernet(get_encryption_key())
+        encrypted = fernet.encrypt(json.dumps(credentials).encode())
+        with open(CREDENTIALS_FILE, 'wb') as f:
+            f.write(encrypted)
+        logger.info("Credentials saved securely")
+    except Exception as e:
+        logger.error(f"Failed to save credentials: {e}")
+        raise
+
+
+def load_credentials_secure():
+    """Load and decrypt credentials"""
+    try:
+        fernet = Fernet(get_encryption_key())
+        with open(CREDENTIALS_FILE, 'rb') as f:
+            decrypted = fernet.decrypt(f.read())
+        return json.loads(decrypted)
+    except Exception as e:
+        logger.error(f"Failed to load credentials: {e}")
+        raise
+
+# --- 5. State Management ---
+
 
 def load_initial_state():
-    """Loads persistent settings (target_temp) from NVM (file)."""
+    """Load persistent settings from NVM"""
     global current_temp, target_temp, heating_on
 
-    default_target_temp = 20.0
-
-    # current_temp is a measurement, always randomize on start
-    current_temp = round(random.uniform(18.0, 23.0), 2)
+    current_temp = round(AMBIENT_TEMP + random.uniform(-1.0, 1.0), 2)
 
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, 'r') as f:
                 state = json.load(f)
-                target_temp = state.get("target_temp", default_target_temp)
-                print(f"✅ Settings loaded from {STATE_FILE}: target_temp={target_temp}")
+                target_temp = state.get("target_temp", None)
+                logger.info(f"Settings loaded: target_temp={target_temp}")
         except (json.JSONDecodeError, IOError) as e:
-            print(f"⚠️ Error reading state file ({e}). Using default target_temp.")
-            target_temp = default_target_temp
+            logger.warning(f"Error reading state file: {e}")
+            target_temp = None
     else:
-        print(f"ℹ️ State file {STATE_FILE} not found. Using default target_temp.")
-        target_temp = default_target_temp
+        logger.info("No state file found. Waiting for commands.")
+        target_temp = None
 
-    # heating_on is a derived state, re-calculate on start
-    heating_on = current_temp < target_temp
-
-    print(f"Initial state set: current_temp={current_temp}, target_temp={target_temp}, heating_on={heating_on}")
+    logger.info(
+        f"Initial state: current={current_temp}°C, target={target_temp}°C, heating={heating_on}")
 
 
 def save_current_state():
-    """Saves persistent settings (target_temp) to NVM (file)."""
+    """Save persistent settings to NVM"""
     try:
         state_data = {"target_temp": target_temp}
         with open(STATE_FILE, 'w') as f:
             json.dump(state_data, f, indent=2)
-        print(f"💾 Settings saved (target_temp={target_temp})")
+        logger.info(f"Settings saved (target_temp={target_temp})")
     except IOError as e:
-        print(f"❌ Error saving settings to {STATE_FILE}: {e}")
+        logger.error(f"Error saving state: {e}")
 
-# --- 5. Provisioning Mode ---
+# --- 6. Telemetry Buffer ---
 
-HTML_TEMPLATE = """
+
+def buffer_telemetry(payload):
+    """Store telemetry when offline"""
+    global telemetry_buffer
+    telemetry_buffer.append({
+        'payload': payload,
+        'timestamp': time.time()
+    })
+    if len(telemetry_buffer) > MAX_BUFFER_SIZE:
+        telemetry_buffer.pop(0)
+
+    if len(telemetry_buffer) % 10 == 0:
+        logger.info(f"Buffer size: {len(telemetry_buffer)} messages")
+
+
+def flush_telemetry_buffer():
+    """Send buffered data when reconnected"""
+    global telemetry_buffer
+    if not telemetry_buffer:
+        return
+
+    logger.info(f"Flushing {len(telemetry_buffer)} buffered messages...")
+    success_count = 0
+
+    for item in telemetry_buffer[:]:
+        result = mqtt_client.publish(
+            f"{TELEMETRY_TOPIC}/{device_id}", item['payload'], qos=1)
+        if result.rc == mqtt.MQTT_ERR_SUCCESS:
+            success_count += 1
+        time.sleep(0.1)
+
+    telemetry_buffer.clear()
+    logger.info(f"Flushed {success_count} messages successfully")
+
+
+# --- 7. Provisioning Mode ---
+HTML_TEMPLATE = r"""
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Provisioning</title>
     <style> body { font-family: sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; } label, input { display: block; margin-bottom: 10px; } input[type=text] { width: 95%; padding: 8px; } button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; } .error { color: red; margin-top: 10px; } </style>
 </head>
 <body>
     <h1>Enter Claim Code</h1>
-    <p>Please get a claim code from the main application and enter it below (format: XXX-XXX).</p>
+    <p>Device on Port: <strong>{{ port }}</strong></p>
+    <p>Please get a claim code from the main application.</p>
     {% if error %} <p class="error">{{ error }}</p> {% endif %}
     <form method="post">
         <label for="claim_code">Claim Code:</label>
@@ -113,139 +267,344 @@ HTML_TEMPLATE = """
 </html>
 """
 
+
 @flask_app.route('/', methods=['GET', 'POST'])
 def provision_form():
+    global flask_server
     error = None
     if request.method == 'POST':
         claim_code = request.form.get('claim_code')
-        if not claim_code:
-            error = "Claim code is required."
-        else:
-            print(f"Attempting to claim device with code: {claim_code}")
-            try:
-                claim_url = f"{USER_DEVICE_SERVICE_URL}/claim-with-code"
-                payload = {"claimCode": claim_code}
-                response = requests.post(claim_url, json=payload, timeout=10)
+        try:
+            claim_url = f"{USER_DEVICE_SERVICE_URL}/claim-with-code"
+            payload = {"claimCode": claim_code}
+            response = requests.post(claim_url, json=payload, timeout=10)
 
-                if response.status_code == 200:
-                    credentials = response.json()
-                    print(f"Successfully claimed! Device ID: {credentials.get('deviceId')}")
-                    with open(CREDENTIALS_FILE, 'w') as f:
-                        json.dump(credentials, f)
-                    print(f"Credentials saved to {CREDENTIALS_FILE}")
-                    provisioning_success.set()
-                    return "<h1>Success!</h1><p>Device claimed. Restarting simulator...</p><script>setTimeout(() => window.location.reload(), 2000);</script>"
-                elif response.status_code == 404:
-                    error = f"Claim failed: Code '{claim_code}' not found or expired."
-                else:
-                    error = f"Claim failed: Server returned status {response.status_code}. Details: {response.text}"
-            except requests.exceptions.RequestException as e:
-                error = f"Claim failed: Could not connect to the server ({USER_DEVICE_SERVICE_URL}). {e}"
-            except Exception as e:
-                error = f"An unexpected error occurred: {e}"
-            print(error)
-    return render_template_string(HTML_TEMPLATE, error=error)
+            if response.status_code == 200:
+                credentials = response.json()
+                logger.info(
+                    f"Claimed! Device ID: {credentials.get('deviceId')}")
+                save_credentials_secure(credentials)
+
+                threading.Thread(
+                    target=lambda: flask_server.shutdown(), daemon=True).start()
+                return "<h1>Success!</h1><p>Device claimed. Restarting...</p>"
+            elif response.status_code == 404:
+                error = "Claim failed: Code not found or expired."
+            else:
+                error = f"Claim failed: Server returned {response.status_code}."
+        except Exception as e:
+            error = f"Claim failed: {e}"
+        logger.error(error)
+
+    return render_template_string(HTML_TEMPLATE, error=error, port=PROVISIONING_SERVER_PORT)
+
+
+@flask_app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    status = {
+        "status": "provisioning",
+        "port": PROVISIONING_SERVER_PORT,
+        "uptime": round(time.time() - start_time, 2)
+    }
+    return json.dumps(status), 200
+
 
 def run_flask_app():
-    print(f"Starting provisioning server at http://localhost:{PROVISIONING_SERVER_PORT}")
-    flask_app.run(host='0.0.0.0', port=PROVISIONING_SERVER_PORT, debug=False)
+    """Start Flask provisioning server"""
+    global flask_server
+    host_ip = '127.0.0.1'
+    logger.info(
+        f"Starting provisioning server on http://{host_ip}:{PROVISIONING_SERVER_PORT}")
+    flask_server = make_server(host_ip, PROVISIONING_SERVER_PORT, flask_app)
+    flask_server.serve_forever()
+
 
 def provisioning_mode():
-    print("No credentials found. Entering provisioning mode...")
-    flask_thread = threading.Thread(target=run_flask_app, daemon=True)
-    flask_thread.start()
-    provisioning_success.wait()
-    print("Provisioning successful. Restarting...")
-    os.execv(sys.executable, ['python'] + sys.argv)
+    """Run provisioning web server"""
+    logger.info("No credentials found. Entering provisioning mode...")
+    run_flask_app()
+    logger.info("Web server stopped. Restarting...")
+
+# --- 8. MQTT Callbacks ---
 
 
-# --- 6. Main Loop ---
-
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties):
+    """Callback for MQTT connection"""
     global connected_to_mqtt
     if rc == 0:
         connected_to_mqtt = True
-        print(f"✅ MQTT Connected Successfully to {MQTT_BROKER_HOST}.")
+        logger.info("MQTT Connected")
         command_topic = f"devices/{device_id}/commands"
         client.subscribe(command_topic)
-        print(f"👂 Subscribed to command topic: {command_topic}")
+        logger.info(f"Subscribed to: {command_topic}")
+
+        # Flush buffered telemetry
+        if telemetry_buffer:
+            flush_telemetry_buffer()
     else:
         connected_to_mqtt = False
-        error_msg = { 1: "refused - incorrect protocol version", 2: "refused - invalid client identifier", 3: "refused - server unavailable", 4: "refused - bad username or password", 5: "refused - not authorised (ACL)", }.get(rc, f"Unknown error code: {rc}")
-        print(f"❌ MQTT Connection Failed: {error_msg}")
+        error_msg = {
+            1: "incorrect protocol",
+            2: "invalid client id",
+            3: "server unavailable",
+            4: "bad username/password",
+            5: "not authorised"
+        }.get(rc, f"unknown error {rc}")
+        logger.error(f"MQTT Connection Failed: {error_msg}")
 
-def on_disconnect(client, userdata, rc):
+
+def on_disconnect(client, userdata, disconnect_flags, rc, properties):
     global connected_to_mqtt
     connected_to_mqtt = False
-    print(f"🔌 MQTT Disconnected with result code: {rc}.")
+    logger.warning(f"MQTT Disconnected (Code: {rc})")
+
 
 def on_message(client, userdata, msg):
+    """Process incoming commands"""
     global target_temp
-    topic = msg.topic
     try:
         payload = json.loads(msg.payload.decode())
-        print(f"📩 Command received on topic '{topic}': {payload}")
-        command = payload.get("command")
-        value = payload.get("value")
+        logger.info(f"Command received: {payload}")
+        cmd = payload.get("command")
+        val = payload.get("value")
 
-        if command == "set_target_temp":
-            try:
-                target_temp = float(value)
-                print(f"⚙️ Target temperature updated to: {target_temp}°C")
-                # Save the new setting to NVM
-                save_current_state()
-            except (ValueError, TypeError):
-                print(f"⚠️ Invalid value for set_target_temp: {value}")
+        if cmd == "set_target_temp":
+            value = float(val)
+
+            # Validation
+            if not (MIN_TEMP <= value <= MAX_TEMP):
+                logger.warning(
+                    f"Invalid temp: {val}°C (range: {MIN_TEMP}-{MAX_TEMP})")
+                return
+
+            target_temp = value
+            logger.info(f"Target temp updated: {target_temp}°C")
+            save_current_state()
+
+        elif cmd == "reset_device":
+            # Security: require confirmation
+            expected = device_id[:8] if device_id else ""
+
+            if val != expected:
+                logger.warning("Reset denied: Invalid confirmation code")
+                return
+
+            logger.warning("FACTORY RESET CONFIRMED")
+            factory_reset_event.set()
+
         else:
-            print(f"❓ Unknown command received: {command}")
+            logger.warning(f"Unknown command: {cmd}")
+
+    except ValueError as e:
+        logger.error(f"Invalid command format: {e}")
     except Exception as e:
-        print(f"🚨 Error processing command: {e}")
+        logger.error(f"Error processing command: {e}")
+
+# --- 9. Simulation ---
+
 
 def simulate_climate_control():
-    global current_temp, heating_on
+    """Simulate heating/cooling physics"""
+    global current_temp, heating_on, thermal_momentum
 
-    if heating_on:
-        current_temp += random.uniform(0.3, 0.8)
-        if current_temp >= target_temp:
+    # 1. Passive environmental impact
+    delta_ambient = AMBIENT_TEMP - current_temp
+    passive_loss = delta_ambient * INSULATION
+
+    active_force = 0.0
+    current_damping = 0.1
+
+    if target_temp is not None:
+        is_heating_mode = target_temp > AMBIENT_TEMP
+        diff = target_temp - current_temp
+        dist = abs(diff)
+
+        # Mode check
+        if (is_heating_mode and diff > -DEADBAND) or (not is_heating_mode and diff < DEADBAND):
+
+            # Switch-on hysteresis
+            if not heating_on:
+                if dist > 0.5:
+                    heating_on = True
+            elif dist < 0.1:
+                heating_on = False
+
+            if heating_on:
+                # --- A. Adaptive power depending on conditions ---
+
+                # 1. Feed-Forward
+                # Power required to maintain the current temperature
+                maintenance_power = abs(passive_loss) / INERTIA_FACTOR
+                maintenance_power = min(maintenance_power, HVAC_POWER * 0.8)
+
+                # 2. Corrective power (depends on distance to target)
+                if dist > 3.0:
+                    correction_power = HVAC_POWER
+                elif dist > 1.5:
+                    correction_power = HVAC_POWER * \
+                        (0.5 + 0.5 * (dist - 1.5) / 1.5)
+                else:
+                    correction_power = HVAC_POWER * (dist / 3.0) ** 0.7
+
+                # Combination
+                total_power = maintenance_power + correction_power
+                total_power = min(total_power, HVAC_POWER)
+
+                # 3. We take into account inertia (thermal momentum)
+                momentum_magnitude = abs(thermal_momentum)
+
+                # Predicting the flight: where will we be in a few steps?
+                predicted_overshoot = current_temp + thermal_momentum * 5
+                predicted_error = abs(target_temp - predicted_overshoot)
+
+                if momentum_magnitude > 0.3:
+                    if predicted_error < dist:
+                        current_damping = 0.7
+                        total_power *= 0.2
+                    elif dist < 2.0:
+                        current_damping = 0.5
+                        total_power *= 0.4
+
+                if dist < 0.3:
+                    current_damping = 0.6
+                    total_power = min(total_power, HVAC_POWER * 0.15)
+
+                # 4. Protection against unproductive consumption
+                if dist < 0.2:
+                    total_power = min(total_power, HVAC_POWER * 0.3)
+
+                direction = 1.0 if diff > 0 else -1.0
+                active_force = total_power * direction
+        else:
             heating_on = False
-            print("🔥 Heating OFF")
     else:
-        current_temp -= random.uniform(0.1, 0.4)
-        if current_temp < target_temp - 0.5:
-            heating_on = True
-            print("🔥 Heating ON")
+        heating_on = False
 
-    current_temp = round(current_temp + random.uniform(-0.1, 0.1), 2)
-    # State is only saved when target_temp changes or heating status changes (in main loop logic if needed)
+    if not heating_on:
+        current_damping = 0.2
 
-def generate_telemetry():
-    simulate_climate_control()
-    return {
+    # 5. Physics with inertia
+    new_momentum = (thermal_momentum * (1.0 - current_damping)
+                    ) + (active_force * INERTIA_FACTOR)
+    new_momentum = max(-2.5, min(2.5, new_momentum))
+
+    thermal_momentum = new_momentum
+    current_temp += passive_loss + thermal_momentum
+
+    # 6. Noise
+    current_temp += random.uniform(-0.02, 0.02)
+    current_temp = round(current_temp, 2)
+
+
+def generate_telemetry_payload():
+    """Generate telemetry JSON"""
+    return json.dumps({
         "deviceId": device_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "data": {
             "currentTemperature": current_temp,
             "targetTemperature": target_temp,
             "heatingStatus": heating_on
         }
-    }
+    })
+
+# --- 10. Factory Reset ---
+
+
+def perform_factory_reset():
+    """Perform secure factory reset"""
+    global mqtt_client
+    logger.warning("Performing Factory Reset...")
+
+    # Graceful MQTT shutdown
+    if mqtt_client:
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+        time.sleep(1)
+
+    # Wipe data
+    try:
+        if os.path.exists(CREDENTIALS_FILE):
+            os.remove(CREDENTIALS_FILE)
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE)
+        logger.info("Data wiped successfully")
+    except OSError as e:
+        logger.error(f"Error deleting files: {e}")
+
+    logger.info("Restarting in provisioning mode...")
+    os.execv(sys.executable, ['python'] + sys.argv)
+
+# --- 11. MQTT Connection with Retry ---
+
+
+def connect_mqtt_with_retry(max_retries=5):
+    """Connect to MQTT with exponential backoff"""
+    retry_delay = 1
+
+    for attempt in range(max_retries):
+        try:
+            mqtt_client.connect(MQTT_BROKER_HOST, port_to_use, 60)
+            mqtt_client.loop_start()
+            logger.info(f"MQTT connection initiated (attempt {attempt+1})")
+            return True
+        except Exception as e:
+            logger.warning(f"Retry {attempt+1}/{max_retries}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)
+
+    logger.error("Failed to connect after all retries")
+    return False
+
+# --- 12. Main Loop ---
+
 
 def main_loop():
-    global mqtt_client
-    print(f"Starting main loop for Device ID: {device_id}")
+    """Main device operation loop"""
+    global mqtt_client, device_id, device_token, port_to_use
+    telemetry_count = 0
 
-    mqtt_client = mqtt.Client(client_id=device_id, protocol=mqtt.MQTTv311)
+    logger.info("Loading credentials...")
+
+    try:
+        credentials = load_credentials_secure()
+        device_id = credentials.get("deviceId")
+        device_token = credentials.get("deviceToken")
+
+        if not device_id or not device_token:
+            logger.error("Credentials corrupted. Deleting...")
+            os.remove(CREDENTIALS_FILE)
+            return
+    except Exception as e:
+        logger.error(f"Error loading credentials: {e}")
+        try:
+            os.remove(CREDENTIALS_FILE)
+        except OSError:
+            pass
+        return
+
+    load_initial_state()
+    logger.info(f"Starting main loop for Device: {device_id}")
+
+    factory_reset_event.clear()
+    mqtt_client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=device_id,
+        protocol=mqtt.MQTTv311
+    )
     mqtt_client.on_connect = on_connect
     mqtt_client.on_disconnect = on_disconnect
     mqtt_client.on_message = on_message
-
     mqtt_client.username_pw_set(username=device_id, password=device_token)
 
     port_to_use = MQTT_PORT
     if MQTT_USE_TLS:
         port_to_use = MQTT_PORT_TLS
         if not os.path.exists(MQTT_CA_CERT):
-            print(f"❌ TLS Error: CA certificate file not found at '{MQTT_CA_CERT}'")
+            logger.error(
+                f"TLS Error: CA cert not found at '{os.path.abspath(MQTT_CA_CERT)}'")
             sys.exit(1)
         try:
             mqtt_client.tls_set(
@@ -253,65 +612,96 @@ def main_loop():
                 cert_reqs=ssl.CERT_REQUIRED,
                 tls_version=ssl.PROTOCOL_TLSv1_2
             )
-            print("🔐 TLS configured.")
+            logger.info("TLS configured")
         except Exception as e:
-            print(f"❌ Error configuring TLS: {e}. Exiting.")
+            logger.error(f"TLS config error: {e}")
             sys.exit(1)
-    else:
-        print("ℹ️ TLS not enabled.")
 
-    print(f"🔌 Connecting to MQTT Broker at {MQTT_BROKER_HOST}:{port_to_use}...")
-    try:
-        mqtt_client.connect(MQTT_BROKER_HOST, port_to_use, 60)
-        mqtt_client.loop_start()
-    except Exception as e:
-        print(f"❌ Failed to connect to MQTT: {e}")
-        return
+    logger.info(f"Connecting to MQTT at {MQTT_BROKER_HOST}:{port_to_use}...")
+    if not connect_mqtt_with_retry():
+        logger.error("Cannot connect to MQTT. Will retry in background.")
 
     try:
-        while True:
+        while not shutdown_event.is_set():
+            if factory_reset_event.is_set():
+                logger.warning("Factory reset triggered. Stopping...")
+                break
+
+            # Always simulate physics
+            simulate_climate_control()
+
+            # Send or buffer telemetry
+            payload = generate_telemetry_payload()
+
+            topic = f"{TELEMETRY_TOPIC}/{device_id}"
+
             if connected_to_mqtt:
-                telemetry = generate_telemetry()
-                payload = json.dumps(telemetry)
-                result = mqtt_client.publish(TELEMETRY_TOPIC, payload, qos=1)
+                result = mqtt_client.publish(topic, payload, qos=1)
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                    print(f"📡 Sent Telemetry: {payload}")
+                    telemetry_count += 1
+                    if telemetry_count % 12 == 0:
+                        logger.info(
+                            f"[{PROVISIONING_SERVER_PORT}] Heartbeat: Still sending data ({payload})")
                 else:
-                    print(f"⚠️ Failed to send telemetry, code: {result.rc}")
+                    logger.warning(f"Failed to send telemetry: {result.rc}")
+                    buffer_telemetry(payload)
             else:
-                print("⏳ MQTT not connected, waiting to reconnect...")
-            time.sleep(PUBLISH_INTERVAL)
+                buffer_telemetry(payload)
+                if telemetry_count % 12 == 0:
+                    logger.info(
+                        f"Offline: {current_temp}°C (buffered: {len(telemetry_buffer)}, Target: {target_temp})")
+                telemetry_count += 1
+
+            # Wait with interrupt support
+            if shutdown_event.wait(timeout=PUBLISH_INTERVAL):
+                break
+
     except KeyboardInterrupt:
-        print("\n🛑 Simulator stopped by user.")
+        logger.info("Simulator stopped by user")
     finally:
-        # State is saved on command receive (on_message), so no save needed here
-        if mqtt_client and mqtt_client.is_connected():
+        if mqtt_client:
             mqtt_client.loop_stop()
             mqtt_client.disconnect()
-        print("🔌 MQTT Disconnected.")
+        logger.info("MQTT Disconnected")
+
+    if factory_reset_event.is_set():
+        perform_factory_reset()
+
+# --- 13. Signal Handlers ---
 
 
-# --- 7. Entry Point ---
+def signal_handler(sig, frame):
+    """Handle graceful shutdown"""
+    logger.info(f"Shutdown signal received ({sig})")
+    shutdown_event.set()
+
+
+# --- 14. Entry Point ---
 if __name__ == "__main__":
-    print_config()
+    logger = setup_logging()
 
-    if os.path.exists(CREDENTIALS_FILE):
-        try:
-            with open(CREDENTIALS_FILE, 'r') as f:
-                credentials = json.load(f)
-                device_id = credentials.get("deviceId")
-                device_token = credentials.get("deviceToken")
-                if not device_id or not device_token:
-                    print(f"⚠️ Credentials file ({CREDENTIALS_FILE}) is corrupted. Deleting and entering provisioning mode.")
-                    os.remove(CREDENTIALS_FILE)
-                    provisioning_mode()
-                else:
-                    load_initial_state() # 1. Load settings
-                    main_loop()          # 2. Run main loop
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"⚠️ Error reading credentials file ({CREDENTIALS_FILE}): {e}. Deleting and entering provisioning mode.")
-            try: os.remove(CREDENTIALS_FILE)
-            except OSError: pass
+    logger.info("=== IoT Device Simulator ===")
+    logger.info(f"MQTT: {MQTT_BROKER_HOST} (TLS: {MQTT_USE_TLS})")
+    logger.info(f"Backend: {USER_DEVICE_SERVICE_URL}")
+    logger.info(f"Telemetry Topic: {TELEMETRY_TOPIC}")
+    logger.info(f"Publish Interval: {PUBLISH_INTERVAL}s")
+    logger.info(f"Buffer Size: {MAX_BUFFER_SIZE}")
+    logger.info(f"Temp Range: {MIN_TEMP}°C - {MAX_TEMP}°C")
+    logger.info("============================")
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Main loop
+    while not shutdown_event.is_set():
+        if not os.path.exists(CREDENTIALS_FILE):
             provisioning_mode()
-    else:
-        provisioning_mode()
+        else:
+            main_loop()
+
+        if not shutdown_event.is_set():
+            logger.info("Re-checking state...")
+            time.sleep(1)
+
+    logger.info("Simulator stopped cleanly")
