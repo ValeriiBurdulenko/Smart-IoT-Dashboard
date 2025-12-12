@@ -105,6 +105,22 @@ services:
     networks:
       - iot-network
     restart: unless-stopped
+  
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672" # AMQP
+      # - "15672:15672" # Management UI
+      - "61613:61613" # STOMP (WebSocker Relay)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    command: >
+      bash -c "rabbitmq-plugins enable rabbitmq_stomp rabbitmq_web_stomp && rabbitmq-server"
+    networks:
+      - iot-network
+    restart: unless-stopped
 
 volumes:
   redis_data:
