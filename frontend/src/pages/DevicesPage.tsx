@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/DeleteForever';
+import DevicesOtherIcon from '@mui/icons-material/DevicesOther';
 
 import { getDevices, deleteDevice } from '../services/ApiService';
 import type { Device } from '../types';
@@ -91,15 +92,50 @@ const DevicesPage: React.FC = () => {
                 mt: 1
             }}>
                 <Typography variant="h4">Geräte</Typography>
-                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setIsAddModalOpen(true)}>
-                    Gerät hinzufügen
-                </Button>
+                {/* We show the button in the header, only if there are devices. 
+                    If not, the button will be in the center of the screen. */}
+                {activeDevices.length > 0 && (
+                    <Button variant="contained" startIcon={<AddIcon />} onClick={() => setIsAddModalOpen(true)}>
+                        Gerät hinzufügen
+                    </Button>
+                )}
             </Box>
 
             {/* Geräteliste */}
             <Stack spacing={2}>
-                {loading && <CircularProgress sx={{ margin: 'auto' }} />}
+                {loading && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 5 }}>
+                        <CircularProgress />
+                    </Box>
+                )}
                 {error && <Typography color="error">{error}</Typography>}
+
+                {/* --- EMPTY STATE --- */}
+                {!loading && !error && activeDevices.length === 0 && (
+                    <Box
+                        sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            py: 8,
+                            backgroundColor: '#f9f9f9',
+                            borderRadius: 2,
+                            border: '1px dashed #e0e0e0'
+                        }}
+                    >
+                        <DevicesOtherIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2, opacity: 0.5 }} />
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                            Keine Geräte gefunden
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                            Sie haben noch keine aktiven Geräte. Fügen Sie jetzt Ihr erstes Gerät hinzu.
+                        </Typography>
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setIsAddModalOpen(true)}>
+                            Erstes Gerät hinzufügen
+                        </Button>
+                    </Box>
+                )}
 
                 {/* 3. Wir mappen jetzt 'paginatedDevices' (nur aktive) */}
                 {!loading && paginatedDevices.map((device) => (

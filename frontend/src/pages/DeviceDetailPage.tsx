@@ -17,12 +17,10 @@ import ThermostatIcon from '@mui/icons-material/Thermostat';
 import SendIcon from '@mui/icons-material/Send';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import KeyboardIcon from '@mui/icons-material/Keyboard';
-import SignalWifi4BarIcon from '@mui/icons-material/SignalWifi4Bar';
-import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import WhatshotIcon from '@mui/icons-material/Whatshot';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
+import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 
 import type { Device } from '../types';
 import { getDeviceById, updateDeviceName, sendTemperatureCommand, getDeviceHistory } from '../services/ApiService';
@@ -63,6 +61,7 @@ const DeviceDetailPage: React.FC = () => {
     const [manualInputError, setManualInputError] = useState<string | null>(null);
     const [sliderBounds, setSliderBounds] = useState({ min: 10, max: 30 });
     const [isSendingCommand, setIsSendingCommand] = useState(false);
+    const [isDataStale, setIsDataStale] = useState(false);
 
     const GLOBAL_MIN = -40;
     const GLOBAL_MAX = 100;
@@ -239,12 +238,33 @@ const DeviceDetailPage: React.FC = () => {
         setSnackbar(null);
     };
 
+    useEffect(() => {
+        if (wsStatus !== 'connected') return;
+
+        setIsDataStale(false);
+
+        const timer = setTimeout(() => {
+            console.warn("Data not update 10 seconds. Think that device is OFFLINE.");
+            setIsDataStale(true);
+        }, 10000);
+
+        return () => clearTimeout(timer);
+
+    }, [liveData]);
+
     if (loading) return <Box p={3}><CircularProgress /></Box>;
     if (error || !device) return <Box p={3}><Typography color="error">{error || "Gerät nicht gefunden"}</Typography></Box>;
 
     const effectiveTarget = liveData?.targetTemperature ?? targetTemp;
     const isHeating = liveData?.heatingStatus && (liveData.currentTemperature < (effectiveTarget - 0.1));
     const isCooling = liveData?.heatingStatus && (liveData.currentTemperature > (effectiveTarget + 0.1));
+
+    const isSocketActive = wsStatus === 'connected';
+    const showOfflineAlert = !isSocketActive || isDataStale;
+
+    const offlineMessage = !isSocketActive
+        ? "Verbindung unterbrochen"
+        : "Keine Daten vom Gerät";
 
     return (
         <Box sx={{ width: '100%' }}>
@@ -450,13 +470,24 @@ const DeviceDetailPage: React.FC = () => {
                     >
                         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Typography variant="h6" fontWeight="bold">Echtzeit-Analyse</Typography>
-                            {liveData && (
+                            {isSocketActive && liveData && !isDataStale ? (
                                 <Chip
                                     icon={<FiberManualRecordIcon sx={{ fontSize: '10px !important', color: '#4caf50', animation: 'pulse 1.5s infinite' }} />}
-                                    label="LIVE" size="small" variant="outlined"
+                                    label="LIVE"
+                                    size="small"
+                                    variant="outlined"
                                     sx={{ fontWeight: 'bold', borderColor: '#4caf50', color: '#2e7d32', bgcolor: 'rgba(76, 175, 80, 0.1)', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.5 }, '100%': { opacity: 1 } } }}
                                 />
-                            )}
+                            ) : showOfflineAlert ? (
+                                <Chip
+                                    icon={<SignalWifiOffIcon />}
+                                    label="OFFLINE"
+                                    size="small"
+                                    color="error"
+                                    variant="outlined"
+                                    sx={{ fontWeight: 'bold' }}
+                                />
+                            ) : null}
                         </Box>
                         <Divider sx={{ my: 2 }} />
                         <Box sx={{ p: 3 }}>
@@ -474,7 +505,7 @@ const DeviceDetailPage: React.FC = () => {
                                                         <Typography component="span" variant="h5" color="text.secondary" sx={{ ml: 1 }}>°C</Typography>
                                                     </>
                                                 ) : (
-                                                    <CircularProgress size={40} thickness={5} sx={{ mt: 1 }} />
+                                                    showOfflineAlert ? "--.-" : <CircularProgress size={40} thickness={5} sx={{ mt: 1 }} />
                                                 )}
                                             </Typography>
                                         </Box>
@@ -492,7 +523,7 @@ const DeviceDetailPage: React.FC = () => {
                                                         sx={{ fontWeight: 'bold', px: 1, height: 32 }}
                                                     />
                                                 ) : (
-                                                    <CircularProgress size={20} color="inherit" />
+                                                    showOfflineAlert ? "" : <CircularProgress size={20} color="inherit" />
                                                 )}
                                             </Box>
                                         </Box>
@@ -501,6 +532,25 @@ const DeviceDetailPage: React.FC = () => {
 
                                 <Grid size={{ xs: 12, md: 9 }}>
                                     <Box sx={{ width: '100%', height: 350, minHeight: 350, bgcolor: '#fbfbfb', borderRadius: 2, border: '1px dashed ${theme.palette.divider}', position: 'relative', overflow: 'hidden' }}>
+                                        {showOfflineAlert && (
+                                            <Box
+                                                sx={{
+                                                    position: 'absolute',
+                                                    top: 0, left: 0, right: 0, bottom: 0,
+                                                    bgcolor: 'rgba(255, 255, 255, 0.7)',
+                                                    backdropFilter: 'blur(2px)',
+                                                    zIndex: 10,
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    color: 'text.secondary'
+                                                }}
+                                            >
+                                                <SignalWifiOffIcon sx={{ fontSize: 48, mb: 1 }} />
+                                                <Typography variant="h6" fontWeight="bold">{offlineMessage}</Typography>
+                                            </Box>
+                                        )}
                                         {historyData.length > 0 ? (
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <AreaChart data={historyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -539,14 +589,14 @@ const DeviceDetailPage: React.FC = () => {
                                             </ResponsiveContainer>
                                         ) : (
                                             <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-                                                {liveData ? (
+                                                {liveData && !showOfflineAlert ? (
                                                     <Typography color="text.secondary">Sammle erste Datenpunkte...</Typography>
-                                                ) : (
+                                                ) : !showOfflineAlert ? (
                                                     <>
                                                         <CircularProgress size={30} sx={{ mb: 2, color: 'text.disabled' }} />
                                                         <Typography color="text.disabled">Warte auf Verbindung...</Typography>
                                                     </>
-                                                )}
+                                                ) : null}
                                             </Box>
                                         )}
                                     </Box>
