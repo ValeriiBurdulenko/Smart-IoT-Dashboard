@@ -1,5 +1,6 @@
 package dashboard.com.smart_iot_dashboard.repository;
 
+import dashboard.com.smart_iot_dashboard.dto.DeviceSummaryDTO;
 import dashboard.com.smart_iot_dashboard.entity.Device;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;

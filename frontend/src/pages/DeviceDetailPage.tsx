@@ -23,12 +23,14 @@ import {
     getDeviceById,
     updateDeviceName,
     sendTemperatureCommand,
-    getDeviceHistory
+    getDeviceHistory,
+    trackDeviceView
 } from '../services/ApiService';
-import type { HistoryPoint } from '../services/ApiService';
+import type { HistoryPoint } from '../types';
 import WebSocketService from '../services/WebSocketService';
 import type { TelemetryData, ConnectionStatus } from '../services/WebSocketService';
 import TemperatureChart from '../components/TemperatureChart';
+import { setStoredDeviceId } from '../utils/StorageLastDevice';
 
 // ━━━ Constants ━━━
 const GLOBAL_MIN = -40;
@@ -36,7 +38,6 @@ const GLOBAL_MAX = 100;
 const HISTORY_LIMIT = 300;
 const DATA_STALE_TIMEOUT = 10000; // 10 seconds
 const SLIDER_PADDING = 10;
-const STORAGE_KEY = 'last_device_id';
 
 type SnackbarState = {
     open: boolean;
@@ -91,17 +92,6 @@ const DeviceDetailPage: React.FC = () => {
         setSliderBounds({ min: newMin, max: newMax });
     }, []);
 
-    // ━━━ Safe localStorage ━━━
-    const setStoredDeviceId = useCallback((id: string): void => {
-        try {
-            if (typeof window !== 'undefined') {
-                localStorage.setItem(STORAGE_KEY, id);
-            }
-        } catch (e) {
-            console.warn('localStorage unavailable:', e);
-        }
-    }, []);
-
     // ━━━ Initial Device Load ━━━
     const fetchDevice = useCallback(async () => {
         if (!deviceId) return;
@@ -127,6 +117,7 @@ const DeviceDetailPage: React.FC = () => {
             }
 
             setStoredDeviceId(deviceId);
+            await trackDeviceView(deviceId);
 
             const history = await getDeviceHistory(deviceId);
             setHistoryData(history);

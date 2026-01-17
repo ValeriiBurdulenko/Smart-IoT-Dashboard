@@ -1,12 +1,7 @@
 import axios from 'axios';
 import KeycloakService from './KeycloakService';
 
-import type { Device } from '../types';
-
-export interface HistoryPoint {
-    timestamp: string;
-    temperature: number;
-}
+import type { Device, HistoryPoint, DashboardStats } from '../types';
 
 const apiClient = axios.create({
     baseURL: import.meta.env.VITE_BACKEND_API_URL
@@ -40,28 +35,62 @@ apiClient.interceptors.response.use(
     }
 );
 
-export const getDevices = (): Promise<Device[]> => {
-    return apiClient.get('/devices').then(res => res.data);
+export const getDevices = async (): Promise<Device[]> => {
+    try {
+        const response = await apiClient.get<Device[]>('/devices');
+        return response.data;
+    } catch (error) {
+        console.error("Failed to fetch devices:", error);
+        throw error;
+    }
 };
 
-export const deleteDevice = (externalId: string): Promise<void> => {
-    return apiClient.delete(`/devices/${externalId}`);
+export const getDeviceById = async (deviceId: string): Promise<Device> => {
+    try {
+        const response = await apiClient.get<Device>(`/devices/${deviceId}`);
+        return response.data;
+    } catch (error) {
+        console.error("Failed to fetch device:", error);
+        throw error;
+    }
 };
 
-export const generateClaimCode = (): Promise<{ claimCode: string }> => {
-    return apiClient.post('/devices/generate-claim-code').then(res => res.data);
+export const updateDeviceName = async (deviceId: string, name: string): Promise<Device> => {
+    try {
+        const response = await apiClient.patch<Device>(`/devices/${deviceId}`, { name });
+        return response.data;
+    } catch (error) {
+        console.error("Failed to update device name:", error);
+        throw error;
+    }
 };
 
-export const getDeviceById = (deviceId: string): Promise<Device> => {
-    return apiClient.get(`/devices/${deviceId}`).then(res => res.data);
+export const deleteDevice = async (externalId: string): Promise<void> => {
+    try {
+        await apiClient.delete(`/devices/${externalId}`);
+    } catch (error) {
+        console.error("Failed to delete device:", error);
+        throw error;
+    }
 };
 
-export const updateDeviceName = (deviceId: string, name: string): Promise<Device> => {
-    return apiClient.patch(`/devices/${deviceId}`, { name }).then(res => res.data);
+export const generateClaimCode = async (): Promise<{ claimCode: string }> => {
+    try {
+        const response = await apiClient.post<{ claimCode: string }>('/devices/generate-claim-code');
+        return response.data;
+    } catch (error) {
+        console.error("Failed to generate claim code:", error);
+        throw error;
+    }
 };
 
-export const sendTemperatureCommand = (deviceId: string, value: number): Promise<void> => {
-    return apiClient.post(`/devices/${deviceId}/command/temperature`, { value });
+export const sendTemperatureCommand = async (deviceId: string, value: number): Promise<void> => {
+    try {
+        await apiClient.post<void>(`/devices/${deviceId}/command/temperature`, { value });
+    } catch (error) {
+        console.error("Failed to send temperature command:", error);
+        throw error;
+    }
 };
 
 export const getDeviceHistory = async (deviceId: string, range = '-1h'): Promise<HistoryPoint[]> => {
@@ -71,9 +100,27 @@ export const getDeviceHistory = async (deviceId: string, range = '-1h'): Promise
         });
         return response.data;
     } catch (error) {
-        console.error("Failed to fetch history:", error);
-        // Return an empty array so that the graph does not break the page with an error
-        return []; 
+        console.error("Failed to fetch device history:", error);
+        return [];  // Return empty array
+    }
+};
+
+export const getDashboardStats = async (): Promise<DashboardStats> => {
+    try {
+        const response = await apiClient.get<DashboardStats>('/dashboard');
+        return response.data;
+    } catch (error) {
+        console.error("Failed to fetch dashboard stats:", error);
+        // Return default structure
+        return { popularDevices: [] };
+    }
+};
+
+export const trackDeviceView = async (deviceId: string): Promise<void> => {
+    try {
+        await apiClient.post<void>(`/dashboard/track/${deviceId}`);
+    } catch (error) {
+        console.error("Failed to track device view:", error);
     }
 };
 

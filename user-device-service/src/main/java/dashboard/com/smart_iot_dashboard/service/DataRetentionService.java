@@ -22,6 +22,7 @@ import java.util.Map;
 public class DataRetentionService {
 
     private final DeviceRepository deviceRepository;
+    private final DashboardService dashboardService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
@@ -39,6 +40,34 @@ public class DataRetentionService {
     public void purgeExpiredDevices() {
         log.info("[DataRetentionJob] Starting data cleanup task...");
 
+        try {
+
+            cleanupViewHistory();
+
+            cleanupExpiredDevices();
+
+            log.info("[DataRetentionJob] cleanup task completed successfully");
+        } catch (Exception e) {
+            log.error("[DataRetentionJob] Error while cleanup task:", e);
+        }
+
+    }
+
+
+    private void cleanupViewHistory() {
+        log.info("[DataRetentionJob] Start of deletion of old viewing logs (older than {} days)...", retentionDays);
+
+        try {
+            dashboardService.cleanupOldHistory((int) retentionDays);
+            log.info("[DataRetentionJob] View logs successfully cleared");
+        } catch (Exception e) {
+            log.error("[DataRetentionJob] Error while deleting viewing logs:", e);
+            // We do not interrupt the transaction, but proceed to the next stage of cleaning.
+        }
+    }
+
+
+    private void cleanupExpiredDevices() {
         Instant cutoffTime = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
 
         List<Device> expiredDevices = deviceRepository.findByIsActiveFalseAndDeactivatedAtBefore(cutoffTime);
