@@ -1,0 +1,257 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: iot_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: username
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - iot-network
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: iot_influxdb
+    restart: always
+    ports:
+        - "8086:8086"
+    environment:
+        DOCKER_INFLUXDB_INIT_MODE: setup
+        DOCKER_INFLUXDB_INIT_USERNAME: admin
+        DOCKER_INFLUXDB_INIT_PASSWORD: password
+        DOCKER_INFLUXDB_INIT_ORG: smart-iot-dashboard
+        DOCKER_INFLUXDB_INIT_BUCKET: iot-data
+        DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: my-super-secret-auth-token
+    volumes:
+        - influxdb_data:/var/lib/influxdb2
+        - influxdb_config:/etc/influxdb2
+    networks:
+        - iot-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: iot_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+      ZOOKEEPER_AUTH_PROVIDER_1: "org.apache.zookeeper.server.auth.SASLAuthenticationProvider"
+      ZOOKEEPER_REQUIRE_CLIENT_AUTH_SCHEME: "sasl"
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/zookeeper_jaas.conf"
+    volumes:
+      - ./docker/kafka-config/kafka_server_jaas.conf:/etc/kafka/zookeeper_jaas.conf:ro
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    ports:
+      - "2181:2181"
+    networks:
+      - iot-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: iot_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    volumes:
+      # --- JAAS config for Kafka ---
+      - ./docker/kafka-config/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
+      - kafka_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_INTERNAL:SASL_PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,SASL_INTERNAL://kafka:29092
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,SASL_INTERNAL://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_INTERNAL
+
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf -Dallow.everyone.if.no.acl.found=false"
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      KAFKA_SUPER_USERS: User:admin
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: INFO
+      KAFKA_LOG4J_LOGGERS: "kafka.authorizer.logger=INFO,state.change.logger=INFO"
+    networks:
+      - iot-network  
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "echo 'security.protocol=SASL_PLAINTEXT\nsasl.mechanism=PLAIN\nsasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"admin-secret\";' > /tmp/healthcheck.properties && kafka-broker-api-versions --bootstrap-server localhost:9092 --command-config /tmp/healthcheck.properties"
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: iot_kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./docker/kafka-config/init_acls.sh:/init_acls.sh:ro
+    command: "bash /init_acls.sh"
+    networks:
+      - iot-network
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    container_name: iot_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass your_redis_password
+    volumes:
+      - redis_data:/data
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  mosquitto:
+    build:
+      context: ./mosquitto
+      dockerfile: DockerFile
+    container_name: iot_mosquitto
+    ports:
+      - "1883:1883"
+      - "8883:8883" # When have TLS configuration
+      # - "9001:9001" # WebSocket
+    volumes:
+      # --- go-auth ---
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+      - ./certs:/mosquitto/certs:ro
+    networks:
+      - iot-network
+    restart: unless-stopped
+  
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: iot_rabbitmq
+    ports:
+      - "5672:5672" # AMQP
+      # - "15672:15672" # Management UI
+      - "61613:61613" # STOMP (WebSocker Relay)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    command: >
+      bash -c "rabbitmq-plugins enable rabbitmq_stomp rabbitmq_web_stomp && rabbitmq-server"
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.0
+    container_name: iot_keycloak
+    restart: always
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: username
+      KC_DB_PASSWORD: password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+
+      # Hostname settings temporary for local network access
+      KC_HOSTNAME: 192.168.178.23
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+
+      #Additional settings for webhook pluigins or custom providers can be added here
+      WEBHOOK_HTTP_BASE_PATH: "http://192.168.178.22:8088/api/internal/keycloak-events"
+      WEBHOOK_EVENTS_TAKEN: "DELETE_ACCOUNT, DELETE_ACCOUNT_ADMIN"
+      WEBHOOK_HTTP_AUTH_USERNAME: "keycloak-webhook-user"
+      WEBHOOK_HTTP_AUTH_PASSWORD: "your-very-strong-secret-password"
+    ports:
+      - "8180:8080"
+    depends_on:
+      - postgres
+    volumes:
+      # Settings import (Realm)
+      - ./docker/keycloak/realms/realm-export.json:/opt/keycloak/data/import/realm.json
+      # Castom themes
+      - ./docker/keycloak/themes:/opt/keycloak/themes
+      # Custom providers
+      - ./docker/keycloak/providers:/opt/keycloak/providers
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - iot-network
+  
+  mqtt-kafka-bridge:
+    build:
+      context: ./mqtt-kafka-bridge
+    container_name: iot_mqtt-kafka-bridge
+    restart: always
+    depends_on:
+      mosquitto:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
+    environment:
+      # Settings MQTT
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT_TLS: 8883          # Port TLS
+      MQTT_BROKER_PORT: 1883              # Port without TLS (not used here)
+      MQTT_USE_TLS: "true"
+      MQTT_CA_CERT: "/app/ca.crt"
+      MQTT_TOPIC_IN: "iot/telemetry/+"
+      MQTT_CLIENT_ID_BASE: "mqtt-kafka-bridge"
+      MQTT_USERNAME: "bridge_client"
+      MQTT_PASSWORD: "a_very_strong_password_for_bridge"
+
+      # Settings Kafka
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC_OUT: iot-telemetry-raw
+      
+      # SASL Auth для Kafka
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_SASL_USERNAME: mqqt_kafka_bridge_user
+      KAFKA_SASL_PASSWORD: bridge-secret
+      
+      # Performance
+      MAX_QUEUE_SIZE: 10000
+      HEALTH_PORT: 8080
+    volumes:
+      - ./certs/ca.crt:/app/ca.crt:ro
+    ports:
+      - "9090:8080"
+    networks:
+      - iot-network
+
+volumes:
+  postgres_data:
+  influxdb_data:
+  influxdb_config:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+
+networks:
+  iot-network:
+    driver: bridge

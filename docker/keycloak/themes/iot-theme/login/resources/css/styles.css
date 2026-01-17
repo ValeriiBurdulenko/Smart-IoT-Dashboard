@@ -1,0 +1,109 @@
+/* styles.css (Version 8: Stärkerer Selektor für Inputs) */
+
+/* 1. Body & Hintergrund (unverändert) */
+html, 
+body,
+.login-pf-page {
+    background-color: #f4f7f6 !important;
+    background-image: none !important;
+    height: 100% !important;
+    font-family: Roboto, -apple-system, sans-serif !important;
+}
+/* 2. Flexbox-Zentrierung (unverändert) */
+.login-pf-page {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 100vh !important;
+    padding: 20px !important;
+}
+/* 3. Titel ("smart-iot-dashboard") (unverändert) */
+.login-pf-page .login-pf-brand {
+    display: block !important;
+    margin-bottom: 24px !important;
+    font-size: 1.75rem !important;
+    font-weight: 600 !important;
+    color: rgb(21, 40, 75) !important;
+}
+/* 4. Die Haupt-Karte (Card) (unverändert) */
+.login-pf-page .card-pf {
+    max-width: 450px !important;
+    width: 100% !important;
+    margin: 0 !important;
+    background-color: rgb(255, 255, 255) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+    border: 1px solid #e0e0e0 !important;
+}
+/* 5. Header INNEN in der Karte (unverändert) */
+.login-pf-page .login-pf-header {
+    background-image: none !important;
+    border-bottom: none !important;
+    padding: 30px 40px 10px !important;
+}
+#kc-header-wrapper {
+    color: rgb(21, 40, 75) !important;
+    font-weight: 600 !important;
+    font-size: 1.5rem !important;
+    text-align: left !important;
+}
+
+/* --- ✅ KORRIGIERTE EINGABEFELDER (Stärkerer Selektor) --- */
+/*
+ * Dieser Selektor zielt auf alle text-, password- und email-Inputs
+ * INNERHALB der Haupt-Login-Karte (.card-pf).
+ * Er ist spezifischer als die Standard-Keycloak-Stile und
+ * gilt für ALLE Seiten (Login, Register, Forgot Password).
+ */
+.login-pf-page .card-pf input[type="text"],
+.login-pf-page .card-pf input[type="password"],
+.login-pf-page .card-pf input[type="email"] {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;
+    padding: 10px !important;
+    height: auto !important;
+    
+    /* Platzhalter-Trick für den Fokus-Rand */
+    box-shadow: 0 0 0 2px transparent !important; 
+    transition: none !important;
+}
+
+/* Fokus-Stil mit demselben starken Selektor */
+.login-pf-page .card-pf input[type="text"]:focus,
+.login-pf-page .card-pf input[type="password"]:focus,
+.login-pf-page .card-pf input[type="email"]:focus {
+    
+    border-color: rgb(77, 107, 221) !important;
+    box-shadow: 0 0 0 2px rgb(77, 107, 221) !important; 
+    outline: none !important;
+}
+/* --- Ende der Korrektur --- */
+
+
+/* 7. Buttons (Submit-Buttons) (unverändert) */
+#kc-login, 
+input[type="submit"] {
+    background-color: rgb(77, 107, 221) !important;
+    background-image: none !important;
+    border: none !important;
+    border-radius: 4px !important;
+    color: white !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    width: 100% !important;
+    padding: 12px !important;
+    margin-top: 10px !important;
+}
+#kc-login:hover,
+input[type="submit"]:hover {
+    background-color: rgb(60, 90, 200) !important;
+}
+
+/* 8. Links (unverändert) */
+a {
+    color: rgb(77, 107, 221) !important;
+}
