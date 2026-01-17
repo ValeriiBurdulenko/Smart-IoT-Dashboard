@@ -13,7 +13,7 @@ import { format } from 'date-fns';
 import AnalyticsIcon from '@mui/icons-material/BarChart';
 import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 
-import type { HistoryPoint } from '../services/ApiService';
+import type { HistoryPoint } from '../types';
 
 interface TemperatureChartProps {
     data: HistoryPoint[];
