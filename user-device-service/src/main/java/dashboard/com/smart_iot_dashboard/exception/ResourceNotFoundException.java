@@ -1,16 +1,8 @@
 package dashboard.com.smart_iot_dashboard.exception;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.ResponseStatus;
-
-@ResponseStatus(HttpStatus.NOT_FOUND)
-public class ResourceNotFoundException extends RuntimeException {
-
-    public ResourceNotFoundException(String message) {
-        super(message);
-    }
-
-    public ResourceNotFoundException(String message, Throwable cause) {
-        super(message, cause);
+public class ResourceNotFoundException extends ApiException {
+    public ResourceNotFoundException(String message, String errorCode) {
+        super(message, errorCode);
     }
 }
+

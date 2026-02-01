@@ -2,7 +2,7 @@ package dashboard.com.smart_iot_dashboard.service;
 
 import dashboard.com.smart_iot_dashboard.entity.Device;
 import dashboard.com.smart_iot_dashboard.dto.DeviceDTO;
-import dashboard.com.smart_iot_dashboard.exception.DeviceNotFoundException;
+import dashboard.com.smart_iot_dashboard.exception.*;
 import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -24,35 +23,39 @@ public class DeviceService {
     private final MqttGateway mqttGateway;
     private final StringRedisTemplate redisTemplate;
 
+    private static final double MIN_TEMP = -40.0;
+    private static final double MAX_TEMP = 100.0;
+
     @Transactional
-    public boolean deleteDeviceByUser(String deviceId, String userId) {
-        return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
-                .map(device -> {
-                    try {
-                        String confirmCode = device.getDeviceId().substring(0, 8);
-                        sendMqttCommand(device.getDeviceId(), "reset_device", confirmCode, 1, false);
-                    } catch (Exception e) {
-                        // Log, but do NOT interrupt deletion.
-                        // If the device is offline, it will still be deleted from the database.
-                        log.warn("Kill switch failed for device {} (likely offline). Proceeding with DB deletion.", deviceId);
-                    }
+    public void deleteDeviceByUser(String deviceId, String userId) {
+        Device device = deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
+                .orElseThrow(() -> new DeviceNotFoundException(deviceId));
 
-                    device.setActive(false);
-                    device.setDeactivatedAt(Instant.now());
-                    deviceRepository.save(device);
+        try {
+            String confirmCode = device.getDeviceId().substring(0, 8);
+            sendMqttCommand(device.getDeviceId(), "reset_device", confirmCode, 1, false);
+        } catch (MqttBrokerUnavailableException e) {
+            // Log, but do NOT interrupt deletion.
+            // If the device is offline, it will still be deleted from the database.
+            log.warn("Kill switch failed for device {} (likely offline). Proceeding with DB deletion.", deviceId);
+        }
 
-                    clearAuthCache(device.getDeviceId());
+        device.setActive(false);
+        device.setDeactivatedAt(Instant.now());
+        deviceRepository.save(device);
 
-                    log.info("Device {} marked for deletion by user {}", deviceId, userId);
-                    return true;
-                })
-                .orElse(false);
+        clearAuthCache(device.getDeviceId());
+        log.info("Device {} marked for deletion by user {}", deviceId, userId);
     }
 
     @Transactional
     public void updateTargetTemperature(String deviceId, String userId, Double newTemp) {
+        if (newTemp < MIN_TEMP || newTemp > MAX_TEMP) {
+            throw new InvalidTemperatureException("Temperature out of range", MIN_TEMP, MAX_TEMP);
+        }
+
         Device device = deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
-                .orElseThrow(() -> new DeviceNotFoundException("Device not found: " + deviceId));
+                .orElseThrow(() -> new DeviceNotFoundException(deviceId));
 
         device.setTargetTemperature(newTemp);
         deviceRepository.save(device);
@@ -64,12 +67,7 @@ public class DeviceService {
 
     @Transactional(readOnly = true)
     public List<DeviceDTO> findAllDevicesByUserIdAndIsActiveTrue(String userId) {
-
-        // 1. Hole die Entities aus der DB
-        List<Device> devices = deviceRepository.findByUserIdAndIsActiveTrue(userId);
-
-        // 2. Konvertiere die Liste von Entities in eine Liste von DTOs
-        return devices.stream()
+        return deviceRepository.findByUserIdAndIsActiveTrue(userId).stream()
                 .map(this::convertToDTO)
                 .toList();
     }
@@ -78,13 +76,17 @@ public class DeviceService {
     public DeviceDTO findDeviceByIdAndUserId(String deviceId, String userId) {
         return deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
                 .map(this::convertToDTO)
-                .orElseThrow(() -> new DeviceNotFoundException("Device not found: " + deviceId));
+                .orElseThrow(() -> new DeviceNotFoundException(deviceId));
     }
 
     @Transactional
     public DeviceDTO updateDeviceName(String deviceId, String userId, String newName) {
+        if (newName == null || newName.isBlank() || newName.length() > 50) {
+            throw new ValidationException("Invalid device name", "INVALID_NAME");
+        }
+
         Device device = deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)
-                .orElseThrow(() -> new DeviceNotFoundException("Device not found or access denied: " + deviceId));
+                .orElseThrow(() -> new DeviceNotFoundException(deviceId));
 
         device.setName(newName);
         Device saved = deviceRepository.save(device);
@@ -92,9 +94,15 @@ public class DeviceService {
         return convertToDTO(saved);
     }
 
-    @Transactional(readOnly = true)
-    public boolean isDeviceOwner(String deviceId, String userId) {
-        return deviceRepository.existsByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId);
+    public void verifyDeviceOwnership(String deviceId, String userId) {
+        if (!deviceRepository.existsByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId)) {
+            log.warn("Access Denied: User {} is not the owner of device {}", userId, deviceId);
+            if (deviceRepository.existsByDeviceIdAndIsActiveTrue(deviceId)) {
+                throw AccessDeniedException.forResource(deviceId);
+            } else {
+                throw new DeviceNotFoundException(deviceId);
+            }
+        }
     }
 
     private DeviceDTO convertToDTO(Device device) {
@@ -151,7 +159,7 @@ public class DeviceService {
 
         } catch (Exception e) {
             log.warn("Failed to send MQTT command '{}' to device {}: {}", commandName, deviceId, e.getMessage());
-            throw new RuntimeException("MQTT Broker unavailable: " + e.getMessage(), e);
+            throw new MqttBrokerUnavailableException("Cannot reach MQTT broker to send command");
         }
     }
 }

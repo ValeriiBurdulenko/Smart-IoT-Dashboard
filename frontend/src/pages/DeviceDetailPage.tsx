@@ -32,7 +32,7 @@ import type { TelemetryData, ConnectionStatus } from '../services/WebSocketServi
 import TemperatureChart from '../components/TemperatureChart';
 import { setStoredDeviceId } from '../utils/StorageLastDevice';
 
-// ━━━ Constants ━━━
+// Constants
 const GLOBAL_MIN = -40;
 const GLOBAL_MAX = 100;
 const HISTORY_LIMIT = 300;
@@ -49,7 +49,7 @@ const DeviceDetailPage: React.FC = () => {
     const { id: deviceId } = useParams<{ id: string }>();
     const theme = useTheme();
 
-    // ━━━ State ━━━
+    // State
     const [device, setDevice] = useState<Device | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -143,6 +143,9 @@ const DeviceDetailPage: React.FC = () => {
     useEffect(() => {
         const unsubscribe = WebSocketService.onStatusChange((status) => {
             setWsStatus(status);
+            if (status !== 'connected') {
+                setIsDataStale(true);
+            }
         });
         return () => unsubscribe();
     }, []);
@@ -150,6 +153,15 @@ const DeviceDetailPage: React.FC = () => {
     // ━━━ WebSocket Data Subscription ━━━
     useEffect(() => {
         if (!device?.deviceId) return;
+
+        const resetStaleTimer = () => {
+            if (staleTimeoutRef.current) clearTimeout(staleTimeoutRef.current);
+            staleTimeoutRef.current = setTimeout(() => {
+                setIsDataStale(true);
+            }, DATA_STALE_TIMEOUT);
+        };
+
+        resetStaleTimer();
 
         console.log(`📡 Subscribing to live data for ${device.deviceId}`);
 
@@ -160,9 +172,7 @@ const DeviceDetailPage: React.FC = () => {
                 setIsDataStale(false);
 
                 // Reset stale timer
-                if (staleTimeoutRef.current) {
-                    clearTimeout(staleTimeoutRef.current);
-                }
+                resetStaleTimer();
 
                 setHistoryData((prev) => {
                     const newPoint: HistoryPoint = {
@@ -187,27 +197,6 @@ const DeviceDetailPage: React.FC = () => {
             }
         };
     }, [device?.deviceId]);
-
-    // ━━━ Data Stale Detection ━━━
-    useEffect(() => {
-        if (wsStatus !== 'connected') {
-            setIsDataStale(true);
-            return;
-        }
-
-        setIsDataStale(false);
-
-        staleTimeoutRef.current = setTimeout(() => {
-            console.warn('Data not updated for 10 seconds');
-            setIsDataStale(true);
-        }, DATA_STALE_TIMEOUT);
-
-        return () => {
-            if (staleTimeoutRef.current) {
-                clearTimeout(staleTimeoutRef.current);
-            }
-        };
-    }, [liveData, wsStatus]);
 
     // ━━━ Name Handlers ━━━
     const handleStartEditName = useCallback(() => {

@@ -29,7 +29,7 @@ public class TelemetryBridgeService {
         }
 
         try {
-            // Spring send it to RabbitMQ (Exchange: amq.topic, Routing Key: device.{id})
+            // Spring send it to RabbitMQ (Routing Key: device.{id}.alert)
             String destination = "/topic/device." + deviceId;
             messagingTemplate.convertAndSend(destination, payload);
         } catch (Exception e) {
