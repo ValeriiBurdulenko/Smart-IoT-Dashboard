@@ -48,6 +48,7 @@ graph TD
     style Device fill:#e1e4e8,stroke:#333
     style DPS fill:#ff9,stroke:#333
     style Kafka fill:#333,stroke:#fff,color:#fff
+```
 
 ## 🔌 Key Features
 
