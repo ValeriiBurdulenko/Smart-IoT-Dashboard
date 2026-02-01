@@ -1,6 +1,7 @@
 package dashboard.com.smart_iot_dashboard.controller;
 
 import dashboard.com.smart_iot_dashboard.dto.DashboardStats;
+import dashboard.com.smart_iot_dashboard.dto.ErrorResponse;
 import dashboard.com.smart_iot_dashboard.service.DashboardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -30,63 +31,38 @@ public class DashboardController {
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Dashboard stats retrieved successfully",
                     content = @Content(mediaType = "application/json", schema = @Schema(implementation = DashboardStats.class))),
-            @ApiResponse(responseCode = "401", description = "Unauthorized - user not authenticated"),
-            @ApiResponse(responseCode = "500", description = "Internal server error")
+            @ApiResponse(responseCode = "401", description = "Unauthorized - user not authenticated",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "503", description = "Service Unavailable - Database error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<DashboardStats> getDashboardStats(
             @AuthenticationPrincipal Jwt jwt) {
 
         String userId = jwt.getSubject();
-
-        if (userId == null) {
-            log.warn("Unauthorized access to dashboard");
-            return ResponseEntity.status(401).build();
-        }
-
         log.debug("Dashboard stats requested for user: {}", userId);
-
-        try {
-            DashboardStats stats = dashboardService.getStats(userId);
-            return ResponseEntity.ok(stats);
-        } catch (Exception e) {
-            log.error("Failed to get dashboard stats for user: {}", userId, e);
-            return ResponseEntity.status(500).build();
-        }
+        DashboardStats stats = dashboardService.getStats(userId);
+        return ResponseEntity.ok(stats);
     }
 
     @PostMapping("/track/{deviceId}")
     @Operation(summary = "Track device view event")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "202", description = "View tracking accepted"),
-            @ApiResponse(responseCode = "400", description = "Invalid device ID"),
-            @ApiResponse(responseCode = "401", description = "Unauthorized"),
-            @ApiResponse(responseCode = "500", description = "Internal server error")
+            @ApiResponse(responseCode = "400", description = "Invalid device ID",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Unauthorized",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<Void> trackView(
             @PathVariable @NotBlank(message = "Device ID cannot be blank") String deviceId,
             @AuthenticationPrincipal Jwt jwt) {
 
         String userId = jwt.getSubject();
-
-        if (userId == null) {
-            log.warn("Unauthorized access to track endpoint");
-            return ResponseEntity.status(401).build();
-        }
-
-        if (deviceId == null || deviceId.isBlank()) {
-            log.warn("Invalid deviceId for tracking: {}", deviceId);
-            return ResponseEntity.badRequest().build();
-        }
-
         log.debug("Tracking device view: user={}, device={}", userId, deviceId);
 
-        try {
-            // Asynchronous operation — the client receives 202 immediately
-            dashboardService.trackDeviceView(userId, deviceId);
-            return ResponseEntity.accepted().build();
-        } catch (Exception e) {
-            log.error("Failed to track view: user={}, device={}", userId, deviceId, e);
-            return ResponseEntity.status(500).build();
-        }
+        dashboardService.trackDeviceView(userId, deviceId);
+
+        return ResponseEntity.accepted().build();
     }
 }

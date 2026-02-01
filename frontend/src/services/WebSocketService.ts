@@ -12,6 +12,15 @@ export interface TelemetryData {
     };
 }
 
+export interface AlertData {
+    alertId: string;
+    deviceId: string;
+    type: string;
+    message: string;
+    value: number;
+    timestamp: number;
+}
+
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 
 class WebSocketService {
@@ -125,26 +134,26 @@ class WebSocketService {
      * Subscription to telemetry for a specific device
      * Automatically activates the client if it is disabled
      */
-    public subscribeToDevice(
-        deviceId: string, 
-        callback: (data: TelemetryData) => void
-    ): { unsubscribe: () => void } {
-        
-        if (!this.client.active) {
-            console.log('🔄 WS: Auto-activating for subscription');
-            this.activate();
-        }
+    public subscribeToDevice(deviceId: string, callback: (data: TelemetryData) => void) {
+        return this.genericSubscribe(`/topic/device.${deviceId}`, callback);
+    }
 
-        const topic = `/topic/device.${deviceId}`;
+    public subscribeToUserAlerts(userId: string, callback: (alert: AlertData) => void) {
+        return this.genericSubscribe(`/topic/user.${userId}.alerts`, callback);
+    }
+
+    private genericSubscribe<T>(topic: string, callback: (data: T) => void): { unsubscribe: () => void } {
+        if (!this.client.active) this.activate();
+
         let subscription: StompSubscription | null = null;
-
+        
         const doSubscribe = () => {
-            console.log(`👂 WS: Sending SUBSCRIBE to ${topic}`);
+            console.log(`👂 WS: Subscribing to ${topic}`);
             try {
                 subscription = this.client.subscribe(topic, (message: IMessage) => {
                     if (message.body) {
                         try {
-                            const data: TelemetryData = JSON.parse(message.body);
+                            const data: T = JSON.parse(message.body);
                             callback(data);
                         } catch (e) {
                             console.error('❌ WS: JSON Parse error', e);
@@ -152,13 +161,10 @@ class WebSocketService {
                     }
                 });
             } catch (error) {
-                console.error("❌ WS: Subscribe failed synchronously", error);
+                console.error("❌ WS: Subscribe failed", error);
             }
         };
 
-        // ЛОГИКА ОЧЕРЕДИ:
-        // Если уже соединены -> подписываемся сразу.
-        // Если нет -> кладем в очередь, чтобы выполнить при onConnect.
         if (this.client.connected) {
             doSubscribe();
         } else {

@@ -5,13 +5,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
+import java.time.Instant;
 
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
-public class DashboardStats {
-    private List<DashboardDeviceDTO> popularDevices;
-    private List<DashboardAlertDTO> latestAlerts;
+public class DashboardAlertDTO {
+    private String alertId;
+    private String deviceId;
+    private String type;
+    private Instant timestamp;
 }

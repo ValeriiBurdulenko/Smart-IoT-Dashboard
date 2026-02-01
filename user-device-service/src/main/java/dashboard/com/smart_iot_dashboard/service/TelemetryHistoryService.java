@@ -4,6 +4,7 @@ package dashboard.com.smart_iot_dashboard.service;
 import com.influxdb.client.InfluxDBClient;
 import com.influxdb.query.FluxRecord;
 import com.influxdb.query.FluxTable;
+import dashboard.com.smart_iot_dashboard.exception.ValidationException;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -42,13 +43,13 @@ public class TelemetryHistoryService {
 
     public List<TelemetryHistoryPoint> getTelemetryHistory(String deviceId, String range){
         if (!isValidDeviceId(deviceId)) {
-            log.warn("Suspicious deviceId format: {}", deviceId);
-            return new ArrayList<>();
+            log.warn("Invalid deviceId format: {}", deviceId);
+            throw new ValidationException("Invalid device identifier format", "INVALID_DEVICE_ID");
         }
 
         if (!isValidRange(range)) {
-            log.warn("Invalid range requested: {}", range);
-            range = "-1h";
+            log.warn("Unsupported range requested: {}", range);
+            throw new ValidationException("Unsupported history range. Use -1h, -6h or -24h", "INVALID_RANGE");
         }
 
         String window = switch (range) {
@@ -87,6 +88,7 @@ public class TelemetryHistoryService {
         } catch (Exception e) {
             log.error("Error querying InfluxDB for {}: {}", deviceId, e.getMessage());
             // We do not throw an exception so as not to break the front end with a 500 error
+            // Exception exist, could add later throw new InfluxDBUnavailableException();
         }
 
         return points;
