@@ -81,6 +81,7 @@ The project architecture is designed for growth. The current backlog focuses on 
 
 * [ ] **High-Load Stress Testing:** Implementation of a dedicated Python script (`stress_test.py`) to simulate **1000+ concurrent devices**. Goal: Validate Kafka partition strategy and Flink backpressure handling under load.
 * [ ] **UX Scalability & Testing:** Refinement of frontend pagination and list management logic to ensure smooth rendering for users with large device fleets (50+ active devices).
+* [ ] **CI/CD Automation:** Implementation of **GitHub Actions** pipelines for automated building, testing, and pushing Docker images to a registry. This will ensure code quality and streamline the deployment process.
 * [ ] **Infrastructure Evolution:** Migration from local Docker Compose to **Kubernetes** (Helm Charts) for production-grade deployment capabilities.
 * [ ] **API Documentation:** Adoption of the **AsyncAPI** specification to formally document Kafka topics and event schemas, complementing the existing OpenAPI (Swagger) documentation.
 * [ ] **Storage Modernization:** Strategic migration to **InfluxDB 3.0** (IOx engine). This will enable native **SQL support** and columnar storage (Apache Parquet) for deeper analytics without proprietary languages like Flux.
