@@ -25,7 +25,9 @@ graph TD
     subgraph Edge_Layer [IoT Edge Layer]
         Device[Smart Device / Simulator] -- MQTT --> Mosquitto[Mosquitto Broker]
         Device -- HTTP Claiming --> APIGateway
-        User[User / React Dashboard] -- HTTP/WS --> APIGateway[User Device Service]
+        
+        User[User / React Dashboard] -- 1. Login --> Keycloak[Keycloak IAM]
+        User -- 2. HTTP/WS (Bearer Token) --> APIGateway[User Device Service]
     end
 
     subgraph Streaming_Core [Streaming Core]
@@ -40,6 +42,7 @@ graph TD
     subgraph Storage_Layer [Storage & Persistence]
         DPS -- Influx Line Protocol --> InfluxDB[(InfluxDB v2)]
         APIGateway -- JPA/JDBC --> Postgres[(PostgreSQL)]
+        APIGateway -. Validate JWT .-> Keycloak
         APIGateway -- Query History --> InfluxDB
         Kafka -- Telemetry Processed --> APIGateway
         Kafka -- Alerts --> APIGateway
@@ -47,8 +50,10 @@ graph TD
 
     style Device fill:#dbeafe,stroke:#333,stroke-width:2px,color:#000
     style DPS fill:#dbeafe,stroke:#333,stroke-width:2px,color:#000
-
+    
     style Kafka fill:#1f2937,stroke:#fff,stroke-width:2px,color:#fff
+    
+    style Keycloak fill:#e9d5ff,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ## 🔌 Key Features
