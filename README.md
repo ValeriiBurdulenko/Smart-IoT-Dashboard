@@ -45,9 +45,10 @@ graph TD
         Kafka -- Alerts --> APIGateway
     end
 
-    style Device fill:#e1e4e8,stroke:#333
-    style DPS fill:#ff9,stroke:#333
-    style Kafka fill:#333,stroke:#fff,color:#fff
+    style Device fill:#dbeafe,stroke:#333,stroke-width:2px,color:#000
+    style DPS fill:#dbeafe,stroke:#333,stroke-width:2px,color:#000
+
+    style Kafka fill:#1f2937,stroke:#fff,stroke-width:2px,color:#fff
 ```
 
 ## 🔌 Key Features
