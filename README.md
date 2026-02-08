@@ -79,7 +79,7 @@ graph TD
 ## Demo
 
 ### 1. Real-Time Control & Telemetry
-![Control Demo](control.gif)
+![Control Demo](grafik.gif)
 
 ## 🚀 Tech Stack
 
