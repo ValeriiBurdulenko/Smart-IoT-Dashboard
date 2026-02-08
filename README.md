@@ -78,6 +78,9 @@ graph TD
 
 ## Demo
 
+### 1. Real-Time Control & Telemetry
+![Control Demo](control.gif)
+
 ## 🚀 Tech Stack
 
 | Domain | Technology | Key Libraries & Details |
