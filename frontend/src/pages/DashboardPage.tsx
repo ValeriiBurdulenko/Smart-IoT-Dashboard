@@ -365,7 +365,7 @@ const DashboardPage: React.FC = () => {
                         sx={{
                             border: `1px solid ${theme.palette.divider}`,
                             p: 2,
-                            height: 260
+                            height: '100%'
                         }}
                     >
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -424,7 +424,7 @@ const DashboardPage: React.FC = () => {
                         sx={{
                             border: `1px solid ${theme.palette.divider}`,
                             p: 2,
-                            height: 260
+                            height: '100%'
                         }}
                     >
                         <Typography variant="h6">Luftfeuchtigkeit</Typography>

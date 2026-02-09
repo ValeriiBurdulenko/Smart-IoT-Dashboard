@@ -18,7 +18,7 @@ import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 
-import type { Device } from '../types';
+import type { Device, HistoryPoint } from '../types';
 import {
     getDeviceById,
     updateDeviceName,
@@ -26,7 +26,7 @@ import {
     getDeviceHistory,
     trackDeviceView
 } from '../services/ApiService';
-import type { HistoryPoint } from '../types';
+
 import WebSocketService from '../services/WebSocketService';
 import type { TelemetryData, ConnectionStatus } from '../services/WebSocketService';
 import TemperatureChart from '../components/TemperatureChart';
@@ -49,16 +49,14 @@ const DeviceDetailPage: React.FC = () => {
     const { id: deviceId } = useParams<{ id: string }>();
     const theme = useTheme();
 
-    // State
+    // ━━━ State ━━━
     const [device, setDevice] = useState<Device | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [snackbar, setSnackbar] = useState<SnackbarState>(null);
 
-    // WebSocket
-    const [wsStatus, setWsStatus] = useState<ConnectionStatus>(
-        WebSocketService.getStatus()
-    );
+    // WebSocket & Data
+    const [wsStatus, setWsStatus] = useState<ConnectionStatus>(WebSocketService.getStatus());
     const [liveData, setLiveData] = useState<TelemetryData['data'] | null>(null);
     const [historyData, setHistoryData] = useState<HistoryPoint[]>([]);
     const [isDataStale, setIsDataStale] = useState(false);
@@ -81,7 +79,7 @@ const DeviceDetailPage: React.FC = () => {
     const subscriptionRef = useRef<any>(null);
     const staleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // ━━━ Temperature Validation ━━━
+    // ━━━ Helpers ━━━
     const validateTemperature = useCallback((value: number): boolean => {
         return value >= GLOBAL_MIN && value <= GLOBAL_MAX;
     }, []);
@@ -92,7 +90,7 @@ const DeviceDetailPage: React.FC = () => {
         setSliderBounds({ min: newMin, max: newMax });
     }, []);
 
-    // ━━━ Initial Device Load ━━━
+    // ━━━ Initial Data Fetch ━━━
     const fetchDevice = useCallback(async () => {
         if (!deviceId) return;
 
@@ -105,10 +103,7 @@ const DeviceDetailPage: React.FC = () => {
             setDevice(data);
             setEditedName(data.name || data.deviceId);
 
-            if (
-                data.targetTemperature !== undefined &&
-                data.targetTemperature !== null
-            ) {
+            if (data.targetTemperature != null) {
                 const temp = data.targetTemperature;
                 if (validateTemperature(temp)) {
                     setTargetTemp(temp);
@@ -122,15 +117,13 @@ const DeviceDetailPage: React.FC = () => {
             const history = await getDeviceHistory(deviceId);
             setHistoryData(history);
         } catch (err) {
-            if (err instanceof Error && err.name === 'AbortError') {
-                return;
-            }
+            if (err instanceof Error && err.name === 'AbortError') return;
             console.error('Device load error:', err);
             setError('Gerät nicht gefunden (404)');
         } finally {
             setLoading(false);
         }
-    }, [deviceId, validateTemperature, updateSliderBounds, setStoredDeviceId]);
+    }, [deviceId, validateTemperature, updateSliderBounds]);
 
     useEffect(() => {
         fetchDevice();
@@ -139,7 +132,7 @@ const DeviceDetailPage: React.FC = () => {
         };
     }, [fetchDevice]);
 
-    // ━━━ WebSocket Status Monitoring ━━━
+    // ━━━ WebSocket Management ━━━
     useEffect(() => {
         const unsubscribe = WebSocketService.onStatusChange((status) => {
             setWsStatus(status);
@@ -150,7 +143,6 @@ const DeviceDetailPage: React.FC = () => {
         return () => unsubscribe();
     }, []);
 
-    // ━━━ WebSocket Data Subscription ━━━
     useEffect(() => {
         if (!device?.deviceId) return;
 
@@ -162,7 +154,6 @@ const DeviceDetailPage: React.FC = () => {
         };
 
         resetStaleTimer();
-
         console.log(`📡 Subscribing to live data for ${device.deviceId}`);
 
         const subscription = WebSocketService.subscribeToDevice(
@@ -170,8 +161,6 @@ const DeviceDetailPage: React.FC = () => {
             (telemetry) => {
                 setLiveData(telemetry.data);
                 setIsDataStale(false);
-
-                // Reset stale timer
                 resetStaleTimer();
 
                 setHistoryData((prev) => {
@@ -192,22 +181,24 @@ const DeviceDetailPage: React.FC = () => {
         return () => {
             console.log(`🔕 Unsubscribing from ${device.deviceId}`);
             subscriptionRef.current?.unsubscribe();
-            if (staleTimeoutRef.current) {
-                clearTimeout(staleTimeoutRef.current);
-            }
+            if (staleTimeoutRef.current) clearTimeout(staleTimeoutRef.current);
         };
     }, [device?.deviceId]);
 
-    // ━━━ Name Handlers ━━━
+    // ━━━ Name Logic ━━━
     const handleStartEditName = useCallback(() => {
+        if (!device) return;
         setIsEditingName(true);
-        setEditedName(device?.name || device?.deviceId || '');
-    }, [device?.name, device?.deviceId]);
+        // Reset to current saved name when starting edit
+        setEditedName(device.name || device.deviceId);
+    }, [device]);
 
     const handleCancelEditName = useCallback(() => {
-        setEditedName(device?.name || device?.deviceId || '');
+        if (!device) return;
+        // Revert changes
+        setEditedName(device.name || device.deviceId);
         setIsEditingName(false);
-    }, [device?.name, device?.deviceId]);
+    }, [device]);
 
     const handleSaveName = useCallback(async () => {
         if (!device || !editedName.trim()) return;
@@ -235,18 +226,15 @@ const DeviceDetailPage: React.FC = () => {
         } finally {
             setIsSavingName(false);
         }
-    }, [device]);
+    }, [device, editedName]);
 
-    // ━━━ Temperature Handlers ━━━
-    const handleSliderChange = useCallback(
-        (event: Event, newValue: number | number[]) => {
-            const temp = newValue as number;
-            if (validateTemperature(temp)) {
-                setTargetTemp(temp);
-            }
-        },
-        [validateTemperature]
-    );
+    // ━━━ Temperature Logic ━━━
+    const handleSliderChange = useCallback((event: Event, newValue: number | number[]) => {
+        const temp = newValue as number;
+        if (validateTemperature(temp)) {
+            setTargetTemp(temp);
+        }
+    }, [validateTemperature]);
 
     const handleEnterManualMode = useCallback(() => {
         setManualTempValue(targetTemp.toString());
@@ -261,17 +249,14 @@ const DeviceDetailPage: React.FC = () => {
 
     const handleSaveManualMode = useCallback(() => {
         const val = parseFloat(manualTempValue);
-
         if (isNaN(val)) {
             setManualInputError('Ungültige Zahl');
             return;
         }
-
         if (!validateTemperature(val)) {
             setManualInputError(`Bereich: ${GLOBAL_MIN}°C bis ${GLOBAL_MAX}°C`);
             return;
         }
-
         setTargetTemp(val);
         updateSliderBounds(val);
         setIsManualInput(false);
@@ -280,13 +265,8 @@ const DeviceDetailPage: React.FC = () => {
 
     const handleSendTemperature = useCallback(async () => {
         if (!device) return;
-
         if (!validateTemperature(targetTemp)) {
-            setSnackbar({
-                open: true,
-                message: 'Ungültige Temperatur',
-                severity: 'error'
-            });
+            setSnackbar({ open: true, message: 'Ungültige Temperatur', severity: 'error' });
             return;
         }
 
@@ -295,15 +275,14 @@ const DeviceDetailPage: React.FC = () => {
             await sendTemperatureCommand(device.deviceId, targetTemp);
             setSnackbar({
                 open: true,
-                message: 'Befehl gesendet! Das Gerät wird aktualisiert, sobald es online ist.',
+                message: 'Befehl gesendet! Das Gerät wird aktualisiert.',
                 severity: 'success'
             });
         } catch (err) {
             console.error('Command failed:', err);
             setSnackbar({
                 open: true,
-                message:
-                    'Fehler: Keine Verbindung zum Broker. Versuchen Sie es später erneut.',
+                message: 'Fehler: Keine Verbindung zum Broker.',
                 severity: 'error'
             });
         } finally {
@@ -311,22 +290,17 @@ const DeviceDetailPage: React.FC = () => {
         }
     }, [device, targetTemp, validateTemperature]);
 
-    const handleCloseSnackbar = useCallback(() => {
-        setSnackbar(null);
-    }, []);
+    const handleCloseSnackbar = useCallback(() => setSnackbar(null), []);
 
-    // ━━━ Computed Values ━━━
+    // ━━━ Render Variables ━━━
     const isSocketActive = wsStatus === 'connected';
     const showOfflineAlert = !isSocketActive || isDataStale;
     const effectiveTarget = liveData?.targetTemperature ?? targetTemp;
+    // Simple hysteresis for UI status
     const isHeating = liveData?.heatingStatus && (liveData.currentTemperature < (effectiveTarget - 0.1));
     const isCooling = liveData?.heatingStatus && (liveData.currentTemperature > (effectiveTarget + 0.1));
+    const offlineMessage = !isSocketActive ? 'Verbindung unterbrochen' : 'Keine Daten vom Gerät';
 
-    const offlineMessage = !isSocketActive
-        ? 'Verbindung unterbrochen'
-        : 'Keine Daten vom Gerät';
-
-    // ━━━ Render ━━━
     if (loading) {
         return (
             <Box p={3} display="flex" justifyContent="center">
