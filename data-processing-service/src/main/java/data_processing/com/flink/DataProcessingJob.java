@@ -37,8 +37,6 @@ import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -113,7 +111,7 @@ public class DataProcessingJob {
 
 
         // --- 1. Reliability Settings ---
-        env.getConfig().setGlobalJobParameters(params);
+        //env.getConfig().setGlobalJobParameters(params);
 
         env.getConfig().enableObjectReuse();
 
@@ -183,7 +181,34 @@ public class DataProcessingJob {
 
         // Sinks for Pipeline 1
         DataStream<String> allAlerts = qosAlerts.union(logicAlerts);
-        allAlerts.sinkTo(createKafkaSink(params.get(KAFKA_TOPIC_ALERTS, "iot-telemetry-alerts"), kafkaProps)).name("Alerts Sink");
+
+        KafkaSink<String> alertsSink = KafkaSink.<String>builder()
+                .setKafkaProducerConfig(kafkaProps)
+                .setRecordSerializer(new KafkaRecordSerializationSchema<String>() {
+                    @Nullable
+                    @Override
+                    public ProducerRecord<byte[], byte[]> serialize(String element, KafkaSinkContext context, Long timestamp) {
+                        try {
+                            ObjectMapper mapper = new ObjectMapper();
+                            JsonNode node = mapper.readTree(element);
+                            String key = node.get(FIELD_DEVICE_ID).asText();
+
+                            return new ProducerRecord<>(
+                                    params.get(KAFKA_TOPIC_ALERTS, "iot-telemetry-alerts"),
+                                    null,
+                                    timestamp,
+                                    key.getBytes(StandardCharsets.UTF_8),
+                                    element.getBytes(StandardCharsets.UTF_8)
+                            );
+                        } catch (Exception e) {
+                            LOG.error("Failed to serialize alert for Kafka: {}", element, e);
+                            return null;
+                        }
+                    }
+                })
+                .build();
+
+        allAlerts.sinkTo(alertsSink).name("Alerts Sink");
         dlqStream.sinkTo(createKafkaSink(params.get(KAFKA_TOPIC_DLQ, "iot-telemetry-dlq"), kafkaProps)).name("DLQ Sink");
 
         // Write to InfluxDB (Async, Non-blocking)
@@ -293,22 +318,26 @@ public class DataProcessingJob {
         private transient InfluxDBClient client;
         private transient WriteApiBlocking writeApi;
         private transient ExecutorService executor;
-        private final ParameterTool params;
+        private final String url;
+        private final String token;
+        private final String org;
+        private final String bucket;
+
         private transient Counter successCounter;
         private transient Counter failureCounter;
 
-        public InfluxDbSinkFunction(ParameterTool params) { this.params = params; }
+        public InfluxDbSinkFunction(ParameterTool params) {
+            this.url = params.getRequired(INFLUX_URL);
+            this.token = params.getRequired(INFLUX_TOKEN);
+            this.org = params.getRequired(INFLUX_ORG);
+            this.bucket = params.getRequired(INFLUX_BUCKET);
+        }
 
         @Override
         public void open(Configuration parameters) {
-            String url = params.getRequired(INFLUX_URL);
-            String token = params.getRequired(INFLUX_TOKEN);
-            String org = params.getRequired(INFLUX_ORG);
-            String bucket = params.getRequired(INFLUX_BUCKET);
-
             client = InfluxDBClientFactory.create(url, token.toCharArray(), org, bucket);
             writeApi = client.getWriteApiBlocking();
-            executor = Executors.newFixedThreadPool(20);
+            executor = Executors.newFixedThreadPool(5);
 
             successCounter = getRuntimeContext().getMetricGroup().counter("influx_writes_success");
             failureCounter = getRuntimeContext().getMetricGroup().counter("influx_writes_failed");
@@ -344,7 +373,7 @@ public class DataProcessingJob {
                 try {
                     writeApi.writePoint(point);
                     successCounter.inc();
-                    resultFuture.complete(Collections.emptyList());
+                    resultFuture.complete(Collections.singletonList(null));
                     return;
                 } catch (Exception e) {
                     if (isLastAttempt(attempt, maxRetries)) {
@@ -394,16 +423,19 @@ public class DataProcessingJob {
         private transient InfluxDBClient client;
         private transient DeleteApi deleteApi;
         private transient ExecutorService executor;
-        private final ParameterTool params;
+        private final String url;
+        private final String token;
+        private final String org;
+        private final String bucket;
 
-        public InfluxDbDeleteSink(ParameterTool params) { this.params = params; }
+        public InfluxDbDeleteSink(ParameterTool params) {
+            this.url = params.getRequired(INFLUX_URL);
+            this.token = params.getRequired(INFLUX_TOKEN);
+            this.org = params.getRequired(INFLUX_ORG);
+            this.bucket = params.getRequired(INFLUX_BUCKET);
+        }
 
         @Override public void open(Configuration c) {
-            String url = params.getRequired(INFLUX_URL);
-            String token = params.getRequired(INFLUX_TOKEN);
-            String org = params.getRequired(INFLUX_ORG);
-            String bucket = params.getRequired(INFLUX_BUCKET);
-
             client = InfluxDBClientFactory.create(url, token.toCharArray(), org, bucket);
             deleteApi = client.getDeleteApi();
             executor = Executors.newFixedThreadPool(5);
@@ -427,8 +459,6 @@ public class DataProcessingJob {
                 try {
                     String sanitizedId = sanitizeDeviceId(event.getDeviceId());
                     String predicate = String.format("_measurement=\"telemetry\" AND \"deviceId\"=\"%s\"", sanitizedId);
-                    String bucket = params.getRequired(INFLUX_BUCKET);
-                    String org = params.getRequired(INFLUX_ORG);
                     deleteApi.delete(OffsetDateTime.parse("1970-01-01T00:00:00Z"), OffsetDateTime.now(), predicate, bucket, org);
                     result.complete(Collections.emptyList());
                 } catch (Exception e) {
@@ -478,7 +508,7 @@ public class DataProcessingJob {
 
     public static class RawJsonMapper extends RichMapFunction<String, ParsedEvent> {
         private transient ObjectMapper mapper;
-        @Override public void open(Configuration c) { mapper = new ObjectMapper(); }
+        @Override public void open(Configuration c) {  mapper = new ObjectMapper().registerModule(new JavaTimeModule()); }
         @Override
         public ParsedEvent map(String value) {
             ParsedEvent pe = new ParsedEvent();
