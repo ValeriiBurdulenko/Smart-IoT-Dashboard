@@ -66,7 +66,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .setClientLogin(rabbitUsername)
                 .setClientPasscode(rabbitPassword)
                 .setSystemLogin(rabbitUsername)
-                .setSystemPasscode(rabbitPassword);
+                .setSystemPasscode(rabbitPassword)
+                .setSystemHeartbeatSendInterval(10000)
+                .setSystemHeartbeatReceiveInterval(10000);
 
         config.setApplicationDestinationPrefixes("/app");
     }
