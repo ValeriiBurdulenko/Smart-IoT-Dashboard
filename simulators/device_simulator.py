@@ -186,6 +186,7 @@ def load_initial_state():
                 state = json.load(f)
                 target_temp = state.get("target_temp", None)
                 logger.info(f"Settings loaded: target_temp={target_temp}")
+                current_temp = round(target_temp + random.uniform(-1.0, 1.0), 2)
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"Error reading state file: {e}")
             target_temp = None
