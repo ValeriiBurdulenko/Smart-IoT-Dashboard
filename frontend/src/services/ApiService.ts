@@ -1,10 +1,12 @@
 import axios from 'axios';
 import KeycloakService from './KeycloakService';
+import { toast } from 'react-toastify';
 
-import type { Device, HistoryPoint, DashboardStats } from '../types';
+import type { Device, HistoryPoint, DashboardStats, Alert, Page, ApiError } from '../types';
 
 const apiClient = axios.create({
-    baseURL: import.meta.env.VITE_BACKEND_API_URL
+    baseURL: import.meta.env.VITE_BACKEND_API_URL,
+    timeout: 10000,
 });
 
 
@@ -23,105 +25,124 @@ apiClient.interceptors.request.use(
 
 
 apiClient.interceptors.response.use(
-    (response) => {
-        return response;
-    },
+    (response) => response,
     (error) => {
-        if (error.response && error.response.status === 401) {
-            console.error("Unauthorized request. Logging out.");
-            KeycloakService.logout();
+        const apiError = error.response?.data as ApiError;
+        const status = error.response?.status;
+
+        // TraceID für das Debugging in der Konsole loggen
+        if (apiError?.traceId) {
+            console.error(`[Backend Error] TraceID: ${apiError.traceId}`, apiError);
         }
-        return Promise.reject(error);
+
+        // Netzwerkfehler oder Timeout
+        if (!error.response) {
+            if (error.code === 'ECONNABORTED') {
+                toast.error("Zeitüberschreitung: Der Server antwortet nicht rechtzeitig.");
+            } else {
+                toast.error("Netzwerkfehler: Bitte prüfen Sie Ihre Internetverbindung.");
+            }
+            return Promise.reject(error);
+        }
+
+        // Auth-Fehler (401)
+        if (status === 401) {
+            KeycloakService.logout();
+            return Promise.reject(apiError);
+        }
+
+        // Business-Logik Fehler (errorCode)
+        switch (apiError?.errorCode) {
+            case "DEVICE_NOT_FOUND":
+                toast.error("Gerät wurde nicht gefunden.");
+                break;
+            case "ACCESS_DENIED":
+                toast.error("Zugriff verweigert: Sie besitzen dieses Gerät nicht.");
+                break;
+            case "INVALID_TEMPERATURE_RANGE":
+                const details = apiError.details;
+                toast.warning(`Temperatur ungültig! Bereich: ${details.minAllowed}°C bis ${details.maxAllowed}°C`);
+                break;
+            case "MQTT_BROKER_UNAVAILABLE":
+                toast.error("Gerät antwortet nicht (MQTT-Verbindung unterbrochen).");
+                break;
+            case "VALIDATION_FAILED":
+                toast.warning("Bitte überprüfen Sie die Formulardaten.");
+                break;
+            case "DUPLICATE_ALERT":
+                console.warn("Alert Duplicate ignored");
+                break;
+            default:
+                if (status === 503 || status === 504) {
+                    toast.error("Server vorübergehend überlastet. Bitte warten.");
+                } else if (status >= 500) {
+                    toast.error(`Kritischer Fehler. Trace-ID: ${apiError?.traceId || 'N/A'}`);
+                } else {
+                    toast.error(apiError?.message || "Ein unbekannter Fehler ist aufgetreten.");
+                }
+        }
+
+        return Promise.reject(apiError || error);
     }
 );
 
-export const getDevices = async (): Promise<Device[]> => {
+export const getDevices = async () => (await apiClient.get<Device[]>('/devices')).data;
+
+export const getDeviceById = async (id: string) => (await apiClient.get<Device>(`/devices/${id}`)).data;
+
+export const updateDeviceName = async (id: string, name: string) => 
+    (await apiClient.patch<Device>(`/devices/${id}`, { name })).data;
+
+export const deleteDevice = async (id: string) => await apiClient.delete(`/devices/${id}`);
+
+export const sendTemperatureCommand = async (id: string, value: number) => 
+    await apiClient.post(`/devices/${id}/command/temperature`, { value });
+    
+export const generateClaimCode = async () => 
+    (await apiClient.post<{ claimCode: string }>('/devices/generate-claim-code')).data;
+
+export const getDeviceHistory = async (id: string, range = '-1h'): Promise<HistoryPoint[]> => {
     try {
-        const response = await apiClient.get<Device[]>('/devices');
-        return response.data;
-    } catch (error) {
-        console.error("Failed to fetch devices:", error);
-        throw error;
-    }
+        const res = await apiClient.get<HistoryPoint[]>(`/devices/${id}/telemetry/history`, { params: { range } });
+        return res.data;
+    } catch { return []; }
 };
 
-export const getDeviceById = async (deviceId: string): Promise<Device> => {
-    try {
-        const response = await apiClient.get<Device>(`/devices/${deviceId}`);
-        return response.data;
-    } catch (error) {
-        console.error("Failed to fetch device:", error);
-        throw error;
-    }
-};
+// --- ALERT METHODS ---
 
-export const updateDeviceName = async (deviceId: string, name: string): Promise<Device> => {
+export const getAlerts = async (page = 0, size = 10, unreadOnly = false): Promise<Page<Alert>> => {
     try {
-        const response = await apiClient.patch<Device>(`/devices/${deviceId}`, { name });
-        return response.data;
-    } catch (error) {
-        console.error("Failed to update device name:", error);
-        throw error;
-    }
-};
-
-export const deleteDevice = async (externalId: string): Promise<void> => {
-    try {
-        await apiClient.delete(`/devices/${externalId}`);
-    } catch (error) {
-        console.error("Failed to delete device:", error);
-        throw error;
-    }
-};
-
-export const generateClaimCode = async (): Promise<{ claimCode: string }> => {
-    try {
-        const response = await apiClient.post<{ claimCode: string }>('/devices/generate-claim-code');
-        return response.data;
-    } catch (error) {
-        console.error("Failed to generate claim code:", error);
-        throw error;
-    }
-};
-
-export const sendTemperatureCommand = async (deviceId: string, value: number): Promise<void> => {
-    try {
-        await apiClient.post<void>(`/devices/${deviceId}/command/temperature`, { value });
-    } catch (error) {
-        console.error("Failed to send temperature command:", error);
-        throw error;
-    }
-};
-
-export const getDeviceHistory = async (deviceId: string, range = '-1h'): Promise<HistoryPoint[]> => {
-    try {
-        const response = await apiClient.get<HistoryPoint[]>(`/devices/${deviceId}/telemetry/history`, {
-            params: { range }
+        const response = await apiClient.get<Page<Alert>>('/alerts', {
+            params: { page, size, unreadOnly }
         });
         return response.data;
     } catch (error) {
-        console.error("Failed to fetch device history:", error);
-        return [];  // Return empty array
+        return {
+            content: [],
+            totalElements: 0,
+            totalPages: 0,
+            number: page,
+            size: size
+        };
     }
 };
+
+export const markAlertAsRead = async (id: string) => await apiClient.patch(`/alerts/${id}/read`);
+export const markAllAlertsAsRead = async () => await apiClient.patch('/alerts/read-all');
+export const deleteAlert = async (id: string) => await apiClient.delete(`/alerts/${id}`);
+
+// --- DASHBOARD METHODS ---
 
 export const getDashboardStats = async (): Promise<DashboardStats> => {
     try {
         const response = await apiClient.get<DashboardStats>('/dashboard');
         return response.data;
     } catch (error) {
-        console.error("Failed to fetch dashboard stats:", error);
         // Return default structure
-        return { popularDevices: [] };
+        return { popularDevices: [], latestAlerts: [] };
     }
 };
 
-export const trackDeviceView = async (deviceId: string): Promise<void> => {
-    try {
-        await apiClient.post<void>(`/dashboard/track/${deviceId}`);
-    } catch (error) {
-        console.error("Failed to track device view:", error);
-    }
-};
+export const trackDeviceView = async (id: string) => await apiClient.post(`/dashboard/track/${id}`);
 
 export default apiClient;

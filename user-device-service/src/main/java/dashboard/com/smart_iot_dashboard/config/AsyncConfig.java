@@ -7,11 +7,6 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
-
-/**
- * Конфигурация для асинхронных операций отслеживания просмотров
- * ✅ Предотвращает переполнение thread pool'а
- */
 @Configuration
 @EnableAsync
 @Slf4j
@@ -21,13 +16,12 @@ public class AsyncConfig {
     public Executor trackingExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
 
-        // ✅ Оптимальные параметры для высоконагруженной системы
-        executor.setCorePoolSize(10);              // Базовое количество потоков
-        executor.setMaxPoolSize(50);               // Максимум потоков
-        executor.setQueueCapacity(500);            // Очередь при переполнении
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(50);
+        executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("device-tracking-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(30);   // Ждать завершения до 30 сек
+        executor.setAwaitTerminationSeconds(30);
         executor.initialize();
 
         log.info("Initialized tracking executor: coreSize={}, maxSize={}, queueCapacity={}",

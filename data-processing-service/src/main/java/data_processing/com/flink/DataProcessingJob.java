@@ -9,8 +9,12 @@ import com.influxdb.client.InfluxDBClientFactory;
 import com.influxdb.client.WriteApiBlocking;
 import com.influxdb.client.domain.WritePrecision;
 import com.influxdb.client.write.Point;
+import data_processing.com.flink.functions.ComplexEventProcessor;
+import data_processing.com.flink.functions.QualityControlFunction;
 import data_processing.com.flink.model.DeviceDeleteEvent;
+import data_processing.com.flink.model.ProcessingConfig;
 import data_processing.com.flink.model.TelemetryEvent;
+import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
@@ -33,8 +37,6 @@ import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -45,6 +47,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Collections;
 import java.util.Properties;
@@ -68,6 +71,7 @@ public class DataProcessingJob {
     private static final String KAFKA_TOPIC_PROCESSED = "kafka.topic.processed";
     private static final String KAFKA_TOPIC_DELETIONS = "kafka.topic.deletions";
     private static final String KAFKA_TOPIC_DLQ = "kafka.topic.dlq";
+    private static final String KAFKA_TOPIC_ALERTS = "kafka.topic.alerts";
 
     private static final String KAFKA_GROUP_ID_TELEMETRY = "kafka.group.id.telemetry";
     private static final String KAFKA_GROUP_ID_DELETIONS = "kafka.group.id.deletions";
@@ -83,9 +87,11 @@ public class DataProcessingJob {
     private static final String KEY_SASL_JAAS_CONFIG = "sasl.jaas.config";
 
     //Validation Constant
+    private static final String FIELD_DEVICE_ID = "deviceId";
     private static final Pattern UUID_PATTERN = Pattern.compile("^[0-9a-fA-F-]{36}$");
-    // Side output tags
-    private static final OutputTag<String> INVALID_EVENTS_TAG = new OutputTag<String>("invalid-events"){};
+    // Side Output Tags
+    public static final OutputTag<String> DLQ_TAG = new OutputTag<String>("dlq-events"){};
+    public static final OutputTag<String> ALERTS_TAG = new OutputTag<String>("alert-events"){};
 
     public static void main(String[] args) throws Exception {
 
@@ -98,10 +104,14 @@ public class DataProcessingJob {
 
         LOG.info("=== Starting IoT Data Processing Job (Clean) ===");
 
+        ProcessingConfig processingConfig = ProcessingConfig.fromParameters(params);
+
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
+
+
         // --- 1. Reliability Settings ---
-        env.getConfig().setGlobalJobParameters(params);
+        //env.getConfig().setGlobalJobParameters(params);
 
         env.getConfig().enableObjectReuse();
 
@@ -138,24 +148,78 @@ public class DataProcessingJob {
                 telemetrySource, WatermarkStrategy.noWatermarks(), "Telemetry Source"
         );
 
-        // Step 1: Validate JSON
-        SingleOutputStreamOperator<TelemetryEvent> validatedStream = rawTelemetryStream
-                .process(new TelemetryValidator())
-                .name("Validate JSON");
+        // 1. Parse JSON first to get timestamp
+        DataStream<ParsedEvent> parsedStream = rawTelemetryStream.map(new RawJsonMapper());
 
-        // Step 2: Handle Invalid Data (DLQ)
-        KafkaSink<String> dlqSink = createKafkaSink(params.get(KAFKA_TOPIC_DLQ, "iot-telemetry-dlq"), kafkaProps);
-        validatedStream.getSideOutput(INVALID_EVENTS_TAG).sinkTo(dlqSink).name("DLQ Sink");
+        // 2. Assign Watermarks based on Event Time
+        DataStream<ParsedEvent> streamWithWatermarks = parsedStream.assignTimestampsAndWatermarks(
+                WatermarkStrategy.<ParsedEvent>forBoundedOutOfOrderness(Duration.ofSeconds(10))
+                        .withTimestampAssigner((SerializableTimestampAssigner<ParsedEvent>) (element, recordTimestamp) -> {
+                            if (element.event != null && element.event.getTimestamp() != null) {
+                                return element.event.getTimestamp().toEpochMilli();
+                            }
+                            return System.currentTimeMillis();
+                        })
+        );
 
-        // Step 3: Write to InfluxDB (Async, Non-blocking)
+        // Quality Control
+        SingleOutputStreamOperator<TelemetryEvent> qualityCheckedStream = streamWithWatermarks
+                .keyBy(ParsedEvent::getDeviceId)
+                .process(new QualityControlFunction(processingConfig, DLQ_TAG, ALERTS_TAG))
+                .name("Quality Control");
+
+        DataStream<String> dlqStream = qualityCheckedStream.getSideOutput(DLQ_TAG);
+        DataStream<String> qosAlerts = qualityCheckedStream.getSideOutput(ALERTS_TAG);
+
+        // Complex Event Processing
+        SingleOutputStreamOperator<TelemetryEvent> monitoredStream = qualityCheckedStream
+                .keyBy(TelemetryEvent::getDeviceId)
+                .process(new ComplexEventProcessor(processingConfig, ALERTS_TAG))
+                .name("Complex Event Processor");
+
+        DataStream<String> logicAlerts = monitoredStream.getSideOutput(ALERTS_TAG);
+
+        // Sinks for Pipeline 1
+        DataStream<String> allAlerts = qosAlerts.union(logicAlerts);
+
+        KafkaSink<String> alertsSink = KafkaSink.<String>builder()
+                .setKafkaProducerConfig(kafkaProps)
+                .setRecordSerializer(new KafkaRecordSerializationSchema<String>() {
+                    @Nullable
+                    @Override
+                    public ProducerRecord<byte[], byte[]> serialize(String element, KafkaSinkContext context, Long timestamp) {
+                        try {
+                            ObjectMapper mapper = new ObjectMapper();
+                            JsonNode node = mapper.readTree(element);
+                            String key = node.get(FIELD_DEVICE_ID).asText();
+
+                            return new ProducerRecord<>(
+                                    params.get(KAFKA_TOPIC_ALERTS, "iot-telemetry-alerts"),
+                                    null,
+                                    timestamp,
+                                    key.getBytes(StandardCharsets.UTF_8),
+                                    element.getBytes(StandardCharsets.UTF_8)
+                            );
+                        } catch (Exception e) {
+                            LOG.error("Failed to serialize alert for Kafka: {}", element, e);
+                            return null;
+                        }
+                    }
+                })
+                .build();
+
+        allAlerts.sinkTo(alertsSink).name("Alerts Sink");
+        dlqStream.sinkTo(createKafkaSink(params.get(KAFKA_TOPIC_DLQ, "iot-telemetry-dlq"), kafkaProps)).name("DLQ Sink");
+
+        // Write to InfluxDB (Async, Non-blocking)
         AsyncDataStream.unorderedWait(
-                validatedStream,
+                monitoredStream,
                 new InfluxDbSinkFunction(params),
                 5000, TimeUnit.MILLISECONDS,
                 20 // Concurrent requests
         ).name("InfluxDB Writer");
 
-        // Step 4: Forward to Processed Topic (for Frontend/WebSocket)
+        // Forward to Processed Topic (for Frontend/WebSocket)
         KafkaSink<String> processedSink = KafkaSink.<String>builder()
                 .setKafkaProducerConfig(kafkaProps)
                 .setRecordSerializer(new KafkaRecordSerializationSchema<String>() {
@@ -165,7 +229,7 @@ public class DataProcessingJob {
                         try {
                             ObjectMapper mapper = new ObjectMapper();
                             JsonNode node = mapper.readTree(element);
-                            String key = node.get("deviceId").asText();
+                            String key = node.get(FIELD_DEVICE_ID).asText();
 
                             // [Image of Kafka Partition Keying]
                             return new ProducerRecord<>(
@@ -183,7 +247,7 @@ public class DataProcessingJob {
                 })
                 .build();
 
-        validatedStream
+        monitoredStream
                 .map(new PojoToJsonMapper<>())
                 .sinkTo(processedSink)
                 .name("Kafka Processed Sink (Keyed)");
@@ -246,43 +310,6 @@ public class DataProcessingJob {
     }
 
     // --- Functions ---
-
-    /**
-     * Simply validates JSON. If invalid -> DLQ. If OK -> proceed.
-     */
-    public static class TelemetryValidator extends ProcessFunction<String, TelemetryEvent> {
-        private transient ObjectMapper objectMapper;
-        private transient Counter validCounter;
-        private transient Counter invalidCounter;
-
-        @Override
-        public void open(Configuration parameters) {
-            objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-            validCounter = getRuntimeContext().getMetricGroup().counter("telemetry_valid");
-            invalidCounter = getRuntimeContext().getMetricGroup().counter("telemetry_invalid");
-        }
-
-        @Override
-        public void processElement(String value, Context ctx, Collector<TelemetryEvent> out) {
-            try {
-                TelemetryEvent event = objectMapper.readValue(value, TelemetryEvent.class);
-
-                if (event == null || !event.isValid()) {
-                    invalidCounter.inc();
-                    ctx.output(INVALID_EVENTS_TAG, value);
-                    return;
-                }
-
-                validCounter.inc();
-                out.collect(event);
-
-            } catch (Exception e) {
-                invalidCounter.inc();
-                ctx.output(INVALID_EVENTS_TAG, value);
-            }
-        }
-    }
-
     /**
      * Writes to InfluxDB asynchronously using a dedicated thread pool.
      * Closes resources correctly.
@@ -291,22 +318,26 @@ public class DataProcessingJob {
         private transient InfluxDBClient client;
         private transient WriteApiBlocking writeApi;
         private transient ExecutorService executor;
-        private final ParameterTool params;
+        private final String url;
+        private final String token;
+        private final String org;
+        private final String bucket;
+
         private transient Counter successCounter;
         private transient Counter failureCounter;
 
-        public InfluxDbSinkFunction(ParameterTool params) { this.params = params; }
+        public InfluxDbSinkFunction(ParameterTool params) {
+            this.url = params.getRequired(INFLUX_URL);
+            this.token = params.getRequired(INFLUX_TOKEN);
+            this.org = params.getRequired(INFLUX_ORG);
+            this.bucket = params.getRequired(INFLUX_BUCKET);
+        }
 
         @Override
         public void open(Configuration parameters) {
-            String url = params.getRequired(INFLUX_URL);
-            String token = params.getRequired(INFLUX_TOKEN);
-            String org = params.getRequired(INFLUX_ORG);
-            String bucket = params.getRequired(INFLUX_BUCKET);
-
             client = InfluxDBClientFactory.create(url, token.toCharArray(), org, bucket);
             writeApi = client.getWriteApiBlocking();
-            executor = Executors.newFixedThreadPool(20);
+            executor = Executors.newFixedThreadPool(5);
 
             successCounter = getRuntimeContext().getMetricGroup().counter("influx_writes_success");
             failureCounter = getRuntimeContext().getMetricGroup().counter("influx_writes_failed");
@@ -342,7 +373,7 @@ public class DataProcessingJob {
                 try {
                     writeApi.writePoint(point);
                     successCounter.inc();
-                    resultFuture.complete(Collections.emptyList());
+                    resultFuture.complete(Collections.singletonList(null));
                     return;
                 } catch (Exception e) {
                     if (isLastAttempt(attempt, maxRetries)) {
@@ -360,7 +391,7 @@ public class DataProcessingJob {
             int heatingStatus = Boolean.TRUE.equals(event.getData().getHeatingStatus()) ? 1 : 0;
 
             Point point = Point.measurement("telemetry")
-                    .addTag("deviceId", event.getDeviceId())
+                    .addTag(FIELD_DEVICE_ID, event.getDeviceId())
                     .addField("currentTemperature", event.getData().getCurrentTemperature())
                     .addField("heatingStatus", heatingStatus)
                     .time(event.getTimestamp(), WritePrecision.MS);
@@ -392,16 +423,19 @@ public class DataProcessingJob {
         private transient InfluxDBClient client;
         private transient DeleteApi deleteApi;
         private transient ExecutorService executor;
-        private final ParameterTool params;
+        private final String url;
+        private final String token;
+        private final String org;
+        private final String bucket;
 
-        public InfluxDbDeleteSink(ParameterTool params) { this.params = params; }
+        public InfluxDbDeleteSink(ParameterTool params) {
+            this.url = params.getRequired(INFLUX_URL);
+            this.token = params.getRequired(INFLUX_TOKEN);
+            this.org = params.getRequired(INFLUX_ORG);
+            this.bucket = params.getRequired(INFLUX_BUCKET);
+        }
 
         @Override public void open(Configuration c) {
-            String url = params.getRequired(INFLUX_URL);
-            String token = params.getRequired(INFLUX_TOKEN);
-            String org = params.getRequired(INFLUX_ORG);
-            String bucket = params.getRequired(INFLUX_BUCKET);
-
             client = InfluxDBClientFactory.create(url, token.toCharArray(), org, bucket);
             deleteApi = client.getDeleteApi();
             executor = Executors.newFixedThreadPool(5);
@@ -425,8 +459,6 @@ public class DataProcessingJob {
                 try {
                     String sanitizedId = sanitizeDeviceId(event.getDeviceId());
                     String predicate = String.format("_measurement=\"telemetry\" AND \"deviceId\"=\"%s\"", sanitizedId);
-                    String bucket = params.getRequired(INFLUX_BUCKET);
-                    String org = params.getRequired(INFLUX_ORG);
                     deleteApi.delete(OffsetDateTime.parse("1970-01-01T00:00:00Z"), OffsetDateTime.now(), predicate, bucket, org);
                     result.complete(Collections.emptyList());
                 } catch (Exception e) {
@@ -450,6 +482,61 @@ public class DataProcessingJob {
             return deviceId
                     .replace("\\", "\\\\")
                     .replace("\"", "\\\"");
+        }
+    }
+
+
+    // --- Inner Classes --
+    public static class ParsedEvent {
+        private String deviceId;
+        private TelemetryEvent event;
+        private String rawJson;
+        private boolean isStructurallyValid;
+
+        public String getDeviceId() { return deviceId; }
+        public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
+
+        public TelemetryEvent getEvent() { return event; }
+        public void setEvent(TelemetryEvent event) { this.event = event; }
+
+        public String getRawJson() { return rawJson; }
+        public void setRawJson(String rawJson) { this.rawJson = rawJson; }
+
+        public boolean isStructurallyValid() { return isStructurallyValid; }
+        public void setStructurallyValid(boolean structurallyValid) { isStructurallyValid = structurallyValid; }
+    }
+
+    public static class RawJsonMapper extends RichMapFunction<String, ParsedEvent> {
+        private transient ObjectMapper mapper;
+        @Override public void open(Configuration c) {  mapper = new ObjectMapper().registerModule(new JavaTimeModule()); }
+        @Override
+        public ParsedEvent map(String value) {
+            ParsedEvent pe = new ParsedEvent();
+            pe.setRawJson(value);
+            pe.setDeviceId("unknown");
+
+            JsonNode node;
+            try {
+                node = mapper.readTree(value);
+                pe.setStructurallyValid(true);
+            } catch (Exception e) {
+                pe.setStructurallyValid(false);
+                return pe;
+            }
+
+            if (node.has(FIELD_DEVICE_ID)) {
+                pe.setDeviceId(node.get(FIELD_DEVICE_ID).asText());
+            }
+
+            try {
+                TelemetryEvent te = mapper.treeToValue(node, TelemetryEvent.class);
+                if (te != null && te.isValid()) {
+                    pe.setEvent(te);
+                }
+            } catch (Exception e) {
+                pe.setEvent(null);
+            }
+            return pe;
         }
     }
 

@@ -1,6 +1,7 @@
 package dashboard.com.smart_iot_dashboard.service;
 
 import dashboard.com.smart_iot_dashboard.entity.Device;
+import dashboard.com.smart_iot_dashboard.exception.DeviceNotFoundException;
 import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,10 +41,10 @@ class DeviceServiceTest {
                 .thenReturn(Optional.of(mockDevice));
 
         // Act
-        boolean result = deviceService.deleteDeviceByUser(deviceId, userId);
+        deviceService.deleteDeviceByUser(deviceId, userId);
 
         // Assert
-        assertThat(result).isTrue();
+        assertThat(deviceService.findDeviceByIdAndUserId(deviceId, userId)).isNull();
 
         // 1. Check that save() was called, NOT delete()
         verify(deviceRepository, never()).delete(any(Device.class));
@@ -68,11 +70,11 @@ class DeviceServiceTest {
         when(deviceRepository.findByDeviceIdAndUserIdAndIsActiveTrue(deviceId, userId))
                 .thenReturn(Optional.empty());
 
-        // Act
-        boolean result = deviceService.deleteDeviceByUser(deviceId, userId);
+        // Act & Assert
+        assertThatThrownBy(() -> deviceService.deleteDeviceByUser(deviceId, userId))
+                .isInstanceOf(DeviceNotFoundException.class)
+                .hasMessageContaining(deviceId);
 
-        // Assert
-        assertThat(result).isFalse(); // Method should return false
         verify(deviceRepository, never()).save(any(Device.class));
     }
 }
