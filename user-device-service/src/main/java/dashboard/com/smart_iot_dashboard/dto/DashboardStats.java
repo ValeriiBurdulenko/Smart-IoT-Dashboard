@@ -12,6 +12,6 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class DashboardStats {
-    // Возвращаем список легких DTO, а не полных сущностей
-    private List<DeviceSummaryDTO> popularDevices;
+    private List<DashboardDeviceDTO> popularDevices;
+    private List<DashboardAlertDTO> latestAlerts;
 }

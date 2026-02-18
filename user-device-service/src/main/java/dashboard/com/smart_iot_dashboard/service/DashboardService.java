@@ -1,10 +1,16 @@
 package dashboard.com.smart_iot_dashboard.service;
 
+import dashboard.com.smart_iot_dashboard.dto.DashboardAlertDTO;
 import dashboard.com.smart_iot_dashboard.dto.DashboardStats;
-import dashboard.com.smart_iot_dashboard.dto.DeviceSummaryDTO;
+import dashboard.com.smart_iot_dashboard.dto.DashboardDeviceDTO;
+import dashboard.com.smart_iot_dashboard.exception.AuthenticationException;
+import dashboard.com.smart_iot_dashboard.exception.InternalServerException;
+import dashboard.com.smart_iot_dashboard.exception.ServiceUnavailableException;
+import dashboard.com.smart_iot_dashboard.repository.AlertRepository;
 import dashboard.com.smart_iot_dashboard.repository.DeviceViewHistoryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +23,7 @@ final class DashboardConstants {
     private DashboardConstants() {}
 
     static final int TOP_DEVICES_LIMIT = 5;
+    static final int RECENT_ALERTS_LIMIT = 5;
     static final int HISTORY_DAYS = 30;
     static final int RECENT_VIEW_MINUTES = 1;
 }
@@ -26,13 +33,15 @@ final class DashboardConstants {
 public class DashboardService {
 
     private final DeviceViewHistoryRepository historyRepository;
+    private final AlertRepository alertRepository;
     private final DashboardService self;
 
 
     public DashboardService(DeviceViewHistoryRepository historyRepository,
-                            @Lazy DashboardService self) {
+                            @Lazy DashboardService self, AlertRepository alertRepository) {
         this.historyRepository = historyRepository;
         this.self = self;
+        this.alertRepository = alertRepository;
     }
 
 
@@ -46,13 +55,12 @@ public class DashboardService {
      */
     @Transactional(readOnly = true)
     public DashboardStats getStats(String userId, LocalDateTime from) {
-        DashboardStats stats = new DashboardStats();
-
         if (isInvalidUserId(userId)) {
-            log.warn("Invalid userId: {}", userId);
-            stats.setPopularDevices(Collections.emptyList());
-            return stats;
+            log.warn("Dashboard stats request with invalid userId: {}", userId);
+            throw new AuthenticationException("Invalid or missing User ID", "AUTH_INVALID_USER");
         }
+
+        DashboardStats stats = new DashboardStats();
 
         try {
             List<DeviceViewHistoryRepository.DeviceStatView> views = historyRepository.findTopDevicesSummaries(
@@ -61,8 +69,8 @@ public class DashboardService {
                     DashboardConstants.TOP_DEVICES_LIMIT
             );
 
-            List<DeviceSummaryDTO> summaries = views.stream()
-                    .map(view -> DeviceSummaryDTO.builder()
+            List<DashboardDeviceDTO> summaries = views.stream()
+                    .map(view -> DashboardDeviceDTO.builder()
                             .deviceId(view.getDeviceId())
                             .name(view.getName())
                             .build())
@@ -75,12 +83,25 @@ public class DashboardService {
             }
 
             stats.setPopularDevices(summaries);
-        } catch (Exception e) {
-            log.error("Failed to get dashboard stats for user: {}", userId, e);
-            stats.setPopularDevices(Collections.emptyList());
-        }
 
-        return stats;
+            List<DashboardAlertDTO> alerts = alertRepository.findRecentAlert(
+                    userId,
+                    PageRequest.of(0, DashboardConstants.RECENT_ALERTS_LIMIT)
+            );
+
+            if (alerts.isEmpty()) {
+                log.debug("No alert history found for user: {}", userId);
+            }  else {
+                log.debug("Found {} recent alert for user {}", alerts.size(), userId);
+            }
+
+            stats.setLatestAlerts(alerts);
+
+            return stats;
+        } catch (Exception e) {
+            log.error("Failed to compile dashboard stats for user {}: {}", userId, e.getMessage());
+            throw new ServiceUnavailableException("Database error while fetching dashboard stats", "DATABASE_ERROR");
+        }
     }
 
     /**
@@ -90,7 +111,6 @@ public class DashboardService {
     @Async("trackingExecutor")
     @Transactional
     public void trackDeviceView(String userId, String deviceId) {
-        // Валидация
         if (isInvalidUserId(userId) || isInvalidDeviceId(deviceId)) {
             log.warn("Invalid track request: userId={}, deviceId={}", userId, deviceId);
             return;
@@ -130,6 +150,7 @@ public class DashboardService {
             log.info("Cleaned up {} old history records", deleted);
         } catch (Exception e) {
             log.error("Failed to cleanup history", e);
+            throw new InternalServerException("Failed to cleanup history", e);
         }
     }
 

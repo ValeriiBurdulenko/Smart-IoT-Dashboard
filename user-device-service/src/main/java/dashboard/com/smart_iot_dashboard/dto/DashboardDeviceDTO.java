@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DeviceSummaryDTO {
+public class DashboardDeviceDTO {
     private String deviceId;
     private String name;
 }

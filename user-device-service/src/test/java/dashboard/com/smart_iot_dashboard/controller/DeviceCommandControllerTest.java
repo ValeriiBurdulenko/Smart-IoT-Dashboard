@@ -3,6 +3,7 @@ package dashboard.com.smart_iot_dashboard.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dashboard.com.smart_iot_dashboard.config.SecurityConfig;
 import dashboard.com.smart_iot_dashboard.dto.DeviceDTO;
+import dashboard.com.smart_iot_dashboard.exception.AccessDeniedException;
 import dashboard.com.smart_iot_dashboard.repository.DeviceRepository;
 import dashboard.com.smart_iot_dashboard.service.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -156,8 +157,7 @@ class DeviceCommandControllerTest {
         @DisplayName("Should delete device successfully when owned by user")
         void deleteDevice_Success() throws Exception {
             // Arrange
-            when(deviceService.deleteDeviceByUser(TEST_DEVICE_ID, TEST_USER_ID))
-                    .thenReturn(true);
+            doNothing().when(deviceService).deleteDeviceByUser(TEST_DEVICE_ID, TEST_USER_ID);
 
             // Act & Assert
             mockMvc.perform(delete("/api/v1/devices/{deviceId}", TEST_DEVICE_ID)
@@ -171,26 +171,28 @@ class DeviceCommandControllerTest {
         @DisplayName("Should return 404 when device not found")
         void deleteDevice_NotFound() throws Exception {
             // Arrange
-            when(deviceService.deleteDeviceByUser(TEST_DEVICE_ID, TEST_USER_ID))
-                    .thenReturn(false);
+            doNothing().when(deviceService).deleteDeviceByUser(TEST_DEVICE_ID, TEST_USER_ID);
 
             // Act & Assert
             mockMvc.perform(delete("/api/v1/devices/{deviceId}", TEST_DEVICE_ID)
                             .with(jwt().jwt(jwt -> jwt.subject(TEST_USER_ID))))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.errorCode").value("DEVICE_NOT_FOUND"))
+                    .andExpect(jsonPath("$.status").value(404));;
         }
 
         @Test
-        @DisplayName("Should return 404 when trying to delete device owned by another user")
+        @DisplayName("Should return 403 when trying to delete device owned by another user")
         void deleteDevice_Forbidden_WrongOwner() throws Exception {
             // Arrange
-            when(deviceService.deleteDeviceByUser(TEST_DEVICE_ID, OTHER_USER_ID))
-                    .thenReturn(false);
+            doThrow(AccessDeniedException.forResource(TEST_DEVICE_ID))
+                    .when(deviceService).deleteDeviceByUser(TEST_DEVICE_ID, OTHER_USER_ID);
 
             // Act & Assert
             mockMvc.perform(delete("/api/v1/devices/{deviceId}", TEST_DEVICE_ID)
                             .with(jwt().jwt(jwt -> jwt.subject(OTHER_USER_ID))))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
         }
 
         @Test

@@ -27,6 +27,8 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import GlobalAlerts from '../components/GlobalAlerts';
+
 const drawerWidth = 280;
 
 const Layout: React.FC = () => {
@@ -145,6 +147,7 @@ const Layout: React.FC = () => {
         <Box sx={{ display: 'flex' }}>
             <CssBaseline />
 
+            <GlobalAlerts />
             {/* 1. Top bar (AppBar) */}
             <AppBar
                 position="fixed"

@@ -53,6 +53,7 @@ services:
       - "2181:2181"
     networks:
       - iot-network
+    stop_grace_period: 2m
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -97,6 +98,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+    stop_grace_period: 2m
 
   kafka-setup:
     image: confluentinc/cp-kafka:7.5.0
@@ -109,7 +111,7 @@ services:
     command: "bash /init_acls.sh"
     networks:
       - iot-network
-    restart: "no"
+    restart: on-failure
 
   redis:
     image: redis:7-alpine
@@ -172,12 +174,12 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: admin
 
       # Hostname settings temporary for local network access
-      KC_HOSTNAME: 192.168.178.23
+      KC_HOSTNAME: localhost
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
 
       #Additional settings for webhook pluigins or custom providers can be added here
-      WEBHOOK_HTTP_BASE_PATH: "http://192.168.178.22:8088/api/internal/keycloak-events"
+      WEBHOOK_HTTP_BASE_PATH: "http://PC:8088/api/internal/keycloak-events"
       WEBHOOK_EVENTS_TAKEN: "DELETE_ACCOUNT, DELETE_ACCOUNT_ADMIN"
       WEBHOOK_HTTP_AUTH_USERNAME: "keycloak-webhook-user"
       WEBHOOK_HTTP_AUTH_PASSWORD: "your-very-strong-secret-password"
@@ -228,7 +230,7 @@ services:
       # SASL Auth для Kafka
       KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
       KAFKA_SASL_MECHANISM: PLAIN
-      KAFKA_SASL_USERNAME: mqqt_kafka_bridge_user
+      KAFKA_SASL_USERNAME: mqtt_kafka_bridge_user
       KAFKA_SASL_PASSWORD: bridge-secret
       
       # Performance
