@@ -28,7 +28,7 @@ export interface DashboardAlert {
 
 export interface DashboardStats {
   popularDevices: DashboardDevice[];
-  recentAlerts: DashboardAlert[];
+  latestAlerts: DashboardAlert[];
 }
 
 

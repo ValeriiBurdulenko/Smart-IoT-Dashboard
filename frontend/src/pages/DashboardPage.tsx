@@ -3,9 +3,10 @@ import { Link as RouterLink } from 'react-router-dom';
 import {
     Grid, Paper, Typography, Box, Button, CircularProgress,
     Card, CardActionArea, Stack, useTheme, Avatar,
-    List, ListItem, ListItemText, ListItemAvatar, Divider
+    List, ListItem, ListItemText, ListItemAvatar, Divider, Link
 } from '@mui/material';
 import DevicesIcon from '@mui/icons-material/Devices';
+import { format } from 'date-fns';
 
 import { getDeviceHistory, getDeviceById, getDashboardStats } from '../services/ApiService';
 import type { DashboardDevice, HistoryPoint, DashboardAlert } from '../types';
@@ -36,7 +37,7 @@ const DashboardPage: React.FC = () => {
     const [lastDevice, setLastDevice] = useState<Device | null>(null);
     const [chartData, setChartData] = useState<HistoryPoint[]>([]);
     const [loading, setLoading] = useState(true);
-    const [recentAlerts, setRecentAlerts] = useState<DashboardAlert[]>([]);
+    const [latestAlerts, setLatestAlerts] = useState<DashboardAlert[]>([]);
 
     // UI State for connectivity
     const [isDataStale, setIsDataStale] = useState(false);
@@ -74,14 +75,14 @@ const DashboardPage: React.FC = () => {
                     const dashboardStats = await getDashboardStats();
                     if (isMounted) {
                         setPopularDevices(dashboardStats.popularDevices ?? []);
-                        setRecentAlerts(dashboardStats.recentAlerts ?? []);
+                        setLatestAlerts(dashboardStats.latestAlerts ?? []);
                     }
                 } catch (error) {
                     console.error("Failed to load dashboard stats:", error);
                     if (isMounted) {
                         setStatsError(true);
                         setPopularDevices([]);
-                        setRecentAlerts([]);
+                        setLatestAlerts([]);
                     }
                 }
 
@@ -168,7 +169,7 @@ const DashboardPage: React.FC = () => {
                     timestamp: alertData.timestamp
                 };
 
-                setRecentAlerts(prev => [newAlert, ...prev].slice(0, 5));
+                setLatestAlerts(prev => [newAlert, ...prev].slice(0, 5));
             }
         );
 
@@ -191,10 +192,8 @@ const DashboardPage: React.FC = () => {
 
     const formatTime = (timestamp: number) => {
         if (!timestamp) return '';
-        return new Date(timestamp).toLocaleTimeString('de-DE', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        const date = new Date(timestamp);
+        return format(date, 'dd.MM HH:mm');
     };
 
     const isSocketActive = wsStatus === 'connected';
@@ -378,8 +377,8 @@ const DashboardPage: React.FC = () => {
                         </Box>
 
                         <List sx={{ p: 0 }}>
-                            {recentAlerts.length > 0 ? (
-                                recentAlerts.slice(0, 4).map((alert, index) => (
+                            {latestAlerts.length > 0 ? (
+                                latestAlerts.slice(0, 4).map((alert, index) => (
                                     <React.Fragment key={alert.alertId}>
                                         <ListItem alignItems="flex-start" disableGutters>
                                             <ListItemAvatar sx={{ minWidth: 40 }}>
@@ -392,13 +391,23 @@ const DashboardPage: React.FC = () => {
                                                     </Typography>
                                                 }
                                                 secondary={
-                                                    <Typography variant="caption" display="block" color="text.secondary">
-                                                        {formatTime(alert.timestamp)} • {alert.deviceId.substring(0, 4)}...
-                                                    </Typography>
+                                                    <>
+                                                        <Typography variant="caption" display="block" color="text.secondary">
+                                                            {formatTime(alert.timestamp)} •
+                                                            <Link
+                                                                component={RouterLink}
+                                                                to={`/devices/${alert.deviceId}`}
+                                                                underline="hover"
+                                                                sx={{ color: 'text.secondary', ml: 0.5 }}
+                                                            >
+                                                                {alert.deviceId.substring(0, 8)}...
+                                                            </Link>
+                                                        </Typography>
+                                                    </>
                                                 }
                                             />
                                         </ListItem>
-                                        {index < recentAlerts.slice(0, 4).length - 1 && <Divider component="li" variant="inset" />}
+                                        {index < latestAlerts.slice(0, 4).length - 1 && <Divider component="li" />}
                                     </React.Fragment>
                                 ))
                             ) : statsError ? (

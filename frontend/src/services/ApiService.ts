@@ -139,7 +139,7 @@ export const getDashboardStats = async (): Promise<DashboardStats> => {
         return response.data;
     } catch (error) {
         // Return default structure
-        return { popularDevices: [], recentAlerts: [] };
+        return { popularDevices: [], latestAlerts: [] };
     }
 };
 
