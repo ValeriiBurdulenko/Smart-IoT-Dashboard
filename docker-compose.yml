@@ -35,6 +35,19 @@ services:
     networks:
         - iot-network
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: orion-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - influxdb
+    networks:
+      - iot-network
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: iot_zookeeper
@@ -71,7 +84,7 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
 
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_INTERNAL:SASL_PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,SASL_INTERNAL://kafka:29092
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://${Laptop_IP}:9092,SASL_INTERNAL://kafka:29092
       KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,SASL_INTERNAL://0.0.0.0:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: SASL_INTERNAL
 
@@ -174,12 +187,12 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: admin
 
       # Hostname settings temporary for local network access
-      KC_HOSTNAME: localhost
+      KC_HOSTNAME: ${Laptop_IP}
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
 
       #Additional settings for webhook pluigins or custom providers can be added here
-      WEBHOOK_HTTP_BASE_PATH: "http://PC:8088/api/internal/keycloak-events"
+      WEBHOOK_HTTP_BASE_PATH: "http://${PC_IP}:8088/api/internal/keycloak-events"
       WEBHOOK_EVENTS_TAKEN: "DELETE_ACCOUNT, DELETE_ACCOUNT_ADMIN"
       WEBHOOK_HTTP_AUTH_USERNAME: "keycloak-webhook-user"
       WEBHOOK_HTTP_AUTH_PASSWORD: "your-very-strong-secret-password"
@@ -253,6 +266,7 @@ volumes:
   zookeeper_data:
   zookeeper_log:
   kafka_data:
+  grafana_data:
 
 networks:
   iot-network:
