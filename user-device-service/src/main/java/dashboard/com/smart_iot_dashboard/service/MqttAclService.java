@@ -15,6 +15,9 @@ public class MqttAclService {
     @Value("${mqtt.bridge.username}")
     private String bridgeUsername;
 
+    @Value("${smart-iot-dashboard.testing.load-test-mode:false}")
+    private boolean isLoadTestMode;
+
     private final DeviceRepository deviceRepository;
 
     private static final int MOSQ_ACL_READ = 1;
@@ -27,6 +30,11 @@ public class MqttAclService {
 
     @Transactional(readOnly = true)
     public boolean checkAcl(String deviceId, Integer accessType, String topic) {
+        // --- 0. FAST-TRACK for testing ---
+        if (isLoadTestMode && "AnonymousIoT".equals(deviceId)) {
+            return true;
+        }
+
         if (checkSystemBridge(deviceId, accessType, topic)) {
             return true;
         }
