@@ -35,7 +35,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: orion-grafana
+    container_name: iot_grafana
     ports:
       - "3001:3000"
     environment:
@@ -47,6 +47,21 @@ services:
       - iot-network
     volumes:
       - grafana_data:/var/lib/grafana
+  
+  load-tester:
+    build:
+      context: ./simulators
+      dockerfile: ./docker/test/Dockerfile.loadtest
+    container_name: iot_load-tester
+    environment:
+      - MQTT_BROKER_HOST=iot_mosquitto
+      - MQTT_BROKER_PORT=1883
+    networks:
+      - iot-network
+    depends_on:
+      - mosquitto
+    profiles:
+      - testing
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0

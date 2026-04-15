@@ -12,7 +12,7 @@ MQTT_BROKER = os.getenv('MQTT_BROKER_HOST', "localhost")
 MQTT_PORT = int(os.getenv('MQTT_BROKER_PORT', "1883"))
 TELEMETRY_TOPIC = os.getenv('TELEMETRY_TOPIC', "iot/telemetry")
 
-NUM_DEVICES = 500
+NUM_DEVICES = 1000
 PUBLISH_INTERVAL = 1.0
 
 messages_sent = 0
@@ -85,9 +85,6 @@ async def main():
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
