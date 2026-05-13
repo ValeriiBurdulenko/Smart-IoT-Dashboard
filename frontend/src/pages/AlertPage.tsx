@@ -255,7 +255,7 @@ const AlertsPage: React.FC = () => {
                     <Pagination
                         count={totalPages}
                         page={page}
-                        onChange={(e, v) => setPage(v)}
+                        onChange={(_e, v) => setPage(v)}
                         color="primary"
                     />
                 </Box>

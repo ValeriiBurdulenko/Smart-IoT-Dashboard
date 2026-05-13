@@ -229,7 +229,7 @@ const DeviceDetailPage: React.FC = () => {
     }, [device, editedName]);
 
     // ━━━ Temperature Logic ━━━
-    const handleSliderChange = useCallback((event: Event, newValue: number | number[]) => {
+    const handleSliderChange = useCallback((_event: Event, newValue: number | number[]) => {
         const temp = newValue as number;
         if (validateTemperature(temp)) {
             setTargetTemp(temp);

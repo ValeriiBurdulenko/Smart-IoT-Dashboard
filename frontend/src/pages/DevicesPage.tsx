@@ -188,7 +188,7 @@ const DevicesPage: React.FC = () => {
                     <Pagination
                         count={pageCount}
                         page={page}
-                        onChange={(e, value) => setPage(value)}
+                        onChange={(_e, value) => setPage(value)}
                         color="primary"
                     />
                 </Box>
