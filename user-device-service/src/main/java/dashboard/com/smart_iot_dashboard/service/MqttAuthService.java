@@ -24,8 +24,18 @@ public class MqttAuthService {
     @Value("${mqtt.bridge.password}")
     private String bridgePassword;
 
+    @Value("${smart-iot-dashboard.testing.load-test-mode:false}")
+    private boolean isLoadTestMode;
+
     @Transactional(readOnly = true)
     public boolean authenticateMqttClient(String username, String password) {
+
+        // --- 0. FAST-TRACK for Testing ---
+        if (isLoadTestMode && "AnonymousIoT".equals(username)) {
+            log.warn("LOAD TEST MODE ACTIVE: Bypassing DB authentication for anonymous user.");
+            return true;
+        }
+
         // 1. Check whether this is a system Bridge client
         if (isBridgeClient(username)) {
             if (isValidBridgePassword(password)) {

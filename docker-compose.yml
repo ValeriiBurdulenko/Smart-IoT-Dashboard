@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -34,6 +32,36 @@ services:
         - influxdb_config:/etc/influxdb2
     networks:
         - iot-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - influxdb
+    networks:
+      - iot-network
+    volumes:
+      - grafana_data:/var/lib/grafana
+  
+  load-tester:
+    build:
+      context: ./simulators
+      dockerfile: ./docker/test/Dockerfile.loadtest
+    container_name: iot_load-tester
+    environment:
+      - MQTT_BROKER_HOST=iot_mosquitto
+      - MQTT_BROKER_PORT=1883
+    networks:
+      - iot-network
+    depends_on:
+      - mosquitto
+    profiles:
+      - testing
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -71,7 +99,8 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
 
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_INTERNAL:SASL_PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,SASL_INTERNAL://kafka:29092
+      # External SASL: LAN/browser host. Override order: KAFKA_ADVERTISED_HOST → IOT_PUBLIC_HOST → Laptop_IP (legacy).
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://${KAFKA_ADVERTISED_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}:9092,SASL_INTERNAL://kafka:29092
       KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,SASL_INTERNAL://0.0.0.0:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: SASL_INTERNAL
 
@@ -134,9 +163,11 @@ services:
       - "1883:1883"
       - "8883:8883" # When have TLS configuration
       # - "9001:9001" # WebSocket
+    environment:
+      # go-auth HTTP backend: hybrid = LAN IP of PC running Spring; all-in-docker = user-device-service
+      SPRING_HOST_HTTP: ${SPRING_HOST_HTTP:-${PC_IP}}
     volumes:
-      # --- go-auth ---
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/mosquitto.conf.template:/mosquitto/config/mosquitto.conf.template:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
       - ./certs:/mosquitto/certs:ro
@@ -173,13 +204,13 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
 
-      # Hostname settings temporary for local network access
-      KC_HOSTNAME: localhost
+      # Public hostname for Keycloak redirects / token issuer host. KEYCLOAK_PUBLIC_HOST → IOT_PUBLIC_HOST → Laptop_IP
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
 
-      #Additional settings for webhook pluigins or custom providers can be added here
-      WEBHOOK_HTTP_BASE_PATH: "http://PC:8088/api/internal/keycloak-events"
+      # Keycloak calls Spring user-device-service here. Hybrid: LAN IP of the PC running Spring. All-in-docker: user-device-service
+      WEBHOOK_HTTP_BASE_PATH: "http://${SPRING_HOST_HTTP:-${PC_IP}}:8088/api/internal/keycloak-events"
       WEBHOOK_EVENTS_TAKEN: "DELETE_ACCOUNT, DELETE_ACCOUNT_ADMIN"
       WEBHOOK_HTTP_AUTH_USERNAME: "keycloak-webhook-user"
       WEBHOOK_HTTP_AUTH_PASSWORD: "your-very-strong-secret-password"
@@ -243,6 +274,131 @@ services:
     networks:
       - iot-network
 
+  # --- Optional: run Spring, Flink job, and SPA in Docker (profile: apps) ---
+  user-device-service:
+    profiles: [apps]
+    build:
+      context: .
+      dockerfile: user-device-service/Dockerfile
+    container_name: iot_user-device-service
+    ports:
+      - "8088:8088"
+    environment:
+      KEYCLOAK_ISSUER_URI: http://${KEYCLOAK_PUBLIC_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}:8180/realms/smart-iot-dashboard
+      SPRING_RABBITMQ_STOMP_PORT: "61613"
+      WEBSOCKET_ALLOWED_ORIGINS: ${WEBSOCKET_ALLOWED_ORIGINS:-*}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:80}
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      influxdb:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  frontend:
+    profiles: [apps]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_KEYCLOAK_URL: http://${KEYCLOAK_PUBLIC_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}:8180
+        VITE_KEYCLOAK_REALM: smart-iot-dashboard
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-iot-frontend-client}
+        VITE_BACKEND_API_URL: http://${KEYCLOAK_PUBLIC_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}:8088
+        VITE_WEBSOCKET_URL: ws://${KEYCLOAK_PUBLIC_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}:8088/ws
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:80"
+    depends_on:
+      - user-device-service
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  flink-jobmanager:
+    profiles: [apps]
+    image: flink:1.18.1-java17
+    container_name: iot_flink-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  flink-taskmanager:
+    profiles: [apps]
+    image: flink:1.18.1-java17
+    container_name: iot_flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  flink-submit:
+    profiles: [apps, flink-submit]
+    build:
+      context: .
+      dockerfile: docker/flink/Dockerfile
+    container_name: iot_flink-submit
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      flink-taskmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
+      influxdb:
+        condition: service_started
+    environment:
+      JOBMANAGER: flink-jobmanager
+      JOBMANAGER_PORT: "8081"
+    networks:
+      - iot-network
+    restart: "no"
+
+  device-simulator:
+    profiles: [sim]
+    build:
+      context: ./simulators
+      dockerfile: Dockerfile
+    container_name: iot_device-simulator
+    environment:
+      MQTT_BROKER_HOST: ${SIM_MQTT_HOST:-mosquitto}
+      MQTT_BROKER_PORT: ${SIM_MQTT_PORT:-1883}
+      MQTT_USE_TLS: ${SIM_MQTT_TLS:-false}
+      USER_DEVICE_SERVICE_URL: ${SIM_USER_DEVICE_SERVICE_URL:-http://${SPRING_HOST_HTTP:-${PC_IP}}:8088/api/v1/devices}
+    depends_on:
+      mosquitto:
+        condition: service_started
+    networks:
+      - iot-network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   influxdb_data:
@@ -253,6 +409,7 @@ volumes:
   zookeeper_data:
   zookeeper_log:
   kafka_data:
+  grafana_data:
 
 networks:
   iot-network:

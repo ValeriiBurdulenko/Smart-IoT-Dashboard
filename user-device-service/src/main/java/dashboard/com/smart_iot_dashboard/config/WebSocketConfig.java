@@ -33,6 +33,11 @@ import java.security.Principal;
 @Order(Ordered.HIGHEST_PRECEDENCE + 99)
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    private static final String TOPIC_DEVICE_PREFIX = "/topic/device.";
+    private static final String DEVICE_ALERT_TOPIC_SUFFIX = ".alert";
+    private static final String TOPIC_USER_ALERTS_PREFIX = "/topic/user.";
+    private static final String USER_ALERTS_TOPIC_SUFFIX = ".alerts";
+
     @Value("${spring.rabbitmq.host:localhost}")
     private String rabbitHost;
 
@@ -120,13 +125,17 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         String destination = accessor.getDestination();
         Principal user = accessor.getUser();
 
-        if (destination != null && destination.startsWith("/topic/device.")) {
+        if (destination == null) {
+            return message;
+        }
+
+        if (destination.startsWith(TOPIC_DEVICE_PREFIX)) {
             if (user == null) {
                 log.warn("Unauthenticated user tried to subscribe to {}", destination);
                 return null;
             }
 
-            String requestedDeviceId = destination.substring("/topic/device.".length());
+            String requestedDeviceId = extractDeviceIdFromDeviceTopic(destination);
             String userId = user.getName();
 
             log.debug("User {} trying to subscribe to device {}", userId, requestedDeviceId);
@@ -135,8 +144,32 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 log.warn("WS Security Alert: User {} tried to spy on device {}", userId, requestedDeviceId);
                 throw new AccessDeniedException("Access Denied");
             }
+        } else if (destination.startsWith(TOPIC_USER_ALERTS_PREFIX) && destination.endsWith(USER_ALERTS_TOPIC_SUFFIX)) {
+            if (user == null) {
+                log.warn("Unauthenticated user tried to subscribe to {}", destination);
+                return null;
+            }
+            String topicUserId = destination.substring(
+                    TOPIC_USER_ALERTS_PREFIX.length(),
+                    destination.length() - USER_ALERTS_TOPIC_SUFFIX.length()
+            );
+            if (!user.getName().equals(topicUserId)) {
+                log.warn("WS Security Alert: User {} tried to subscribe to alerts topic of {}", user.getName(), topicUserId);
+                throw new AccessDeniedException("Access Denied");
+            }
         }
         return message;
+    }
+
+    /**
+     * Telemetry uses {@code /topic/device.{deviceId}}; device-scoped alerts use {@code /topic/device.{deviceId}.alert}.
+     */
+    private static String extractDeviceIdFromDeviceTopic(String destination) {
+        String rest = destination.substring(TOPIC_DEVICE_PREFIX.length());
+        if (rest.endsWith(DEVICE_ALERT_TOPIC_SUFFIX)) {
+            return rest.substring(0, rest.length() - DEVICE_ALERT_TOPIC_SUFFIX.length());
+        }
+        return rest;
     }
 }
 

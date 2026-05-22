@@ -1,11 +1,7 @@
-# Legacy static config (not used by the Docker image).
-# Docker uses ../mosquitto.conf.template + SPRING_HOST_HTTP at container start.
-# For bare-metal Mosquitto you can still point auth_opt_http_host here.
-
 auth_plugin /usr/lib/go-auth.so
 
 auth_opt_backends http
-auth_opt_http_host 192.168.178.27
+auth_opt_http_host ${SPRING_HOST_HTTP}
 auth_opt_http_port 8088
 auth_opt_http_method POST
 auth_opt_http_params_mode json
@@ -28,7 +24,6 @@ auth_opt_acl_jitter_seconds 30
 auth_opt_log_level info
 
 # --- Listener ---
-# Old listener on 1883 (for tests)
 listener 1883
 protocol mqtt
 
@@ -41,8 +36,8 @@ certfile /mosquitto/certs/server.crt
 
 require_certificate false
 
-# --- Another Settings of Mosquitto ---
+# --- Persistence ---
 persistence true
 persistence_location /mosquitto/data/
 log_dest file /mosquitto/log/mosquitto.log
-log_type all # (e.g., error warning information notice)
+log_type all
