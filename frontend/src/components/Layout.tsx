@@ -171,7 +171,7 @@ const Layout: React.FC = () => {
                         <MenuIcon />
                     </IconButton>
                     {isDashboardPage ? (
-                        <Typography variant="h5" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
+                        <Typography variant="h5" noWrap component="h1" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
                             Dashboard
                         </Typography>
                     ) : (
