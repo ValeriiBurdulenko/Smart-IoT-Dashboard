@@ -13,6 +13,7 @@ import type { DashboardDevice, HistoryPoint, DashboardAlert } from '../types';
 import type { Device } from '../types';
 import TemperatureChart from '../components/TemperatureChart';
 import WebSocketService from '../services/WebSocketService';
+import KeycloakService from '../services/KeycloakService';
 
 import WhatshotIcon from '@mui/icons-material/Whatshot';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -159,8 +160,9 @@ const DashboardPage: React.FC = () => {
 
         subscriptionRef.current = telemetrySub;
 
-        const alertsSub = WebSocketService.subscribeToUserAlerts(lastDevice.deviceId,
-            (alertData) => {
+        const userId = KeycloakService.getUserId();
+        if (userId) {
+            const alertsSub = WebSocketService.subscribeToUserAlerts(userId, (alertData) => {
                 setStatsError(false);
                 const newAlert: DashboardAlert = {
                     alertId: alertData.alertId,
@@ -170,10 +172,11 @@ const DashboardPage: React.FC = () => {
                 };
 
                 setLatestAlerts(prev => [newAlert, ...prev].slice(0, 5));
-            }
-        );
-
-        alertsSubscriptionRef.current = alertsSub;
+            });
+            alertsSubscriptionRef.current = alertsSub;
+        } else {
+            alertsSubscriptionRef.current = null;
+        }
 
         return () => {
             subscriptionRef.current?.unsubscribe();

@@ -1,0 +1,97 @@
+# Used when Spring runs inside Docker (profile: docker).
+# Paths and secrets match docker-compose defaults in this repo.
+
+server:
+  port: 8088
+
+spring:
+  application:
+    name: user-device-service
+  datasource:
+    url: jdbc:postgresql://postgres:5432/user_device_db
+    username: username
+    password: password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: your_redis_password
+  kafka:
+    bootstrap-servers: kafka:29092
+    consumer:
+      group-id: backend-group
+      properties:
+        security.protocol: SASL_PLAINTEXT
+        sasl.mechanism: PLAIN
+        sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="user_device_service_user" password="service-secret";
+    producer:
+      properties:
+        security.protocol: SASL_PLAINTEXT
+        sasl.mechanism: PLAIN
+        sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="user_device_service_user" password="service-secret";
+  rabbitmq:
+    host: rabbitmq
+    stomp:
+      port: 61613
+    username: guest
+    password: guest
+  influxdb:
+    url: http://influxdb:8086
+    token: my-super-secret-auth-token
+    org: smart-iot-dashboard
+    bucket: iot-data
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/smart-iot-dashboard}
+
+kafka:
+  topic:
+    processed: iot-telemetry-processed
+    deletions: iot-device-deletions
+  consumer:
+    group-id: backend-group
+
+app:
+  kafka:
+    topic:
+      alerts: iot-telemetry-alerts
+
+mqtt:
+  broker:
+    url:
+      tls: ssl://mosquitto:8883
+  client:
+    id:
+      outbound: spring-backend-docker
+  bridge:
+    username: bridge_client
+    password: a_very_strong_password_for_bridge
+
+websocket:
+  allowed-origins: "*"
+
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost,http://localhost:80,http://127.0.0.1}
+
+keycloak:
+  webhook:
+    auth:
+      username: keycloak-webhook-user
+      password: your-very-strong-secret-password
+
+retention:
+  purge:
+    days: 90
+
+smart-iot-dashboard:
+  testing:
+    load-test-mode: false

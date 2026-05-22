@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+# Arbeitsverzeichnis im Container
+WORKDIR /app
+
+# Bibliotheken installieren
+RUN pip install --no-cache-dir aiomqtt python-dotenv
+
+# Unser Skript in den Container kopieren
+COPY load_test.py .
+
+# Befehl zum Starten des Skripts
+CMD ["python", "load_test.py"]

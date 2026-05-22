@@ -1,23 +1,21 @@
-# mosquitto-debian/Dockerfile
+# Mosquitto + go-auth with templated HTTP auth host (SPRING_HOST_HTTP)
 FROM debian:stable-slim
 
-# Install Mosquitto and client tools from Debian repositories
 RUN apt-get update && apt-get install -y --no-install-recommends \
     mosquitto \
     mosquitto-clients \
+    gettext-base \
+    gosu \
  && rm -rf /var/lib/apt/lists/*
 
-# Create directories for config, data, log
 RUN mkdir -p /mosquitto/config /mosquitto/data /mosquitto/log \
  && chown -R mosquitto:mosquitto /mosquitto
 
-# Copy your pre-downloaded plugin into the image
 COPY go-auth.so /usr/lib/go-auth.so
+COPY mosquitto.conf.template /mosquitto/config/mosquitto.conf.template
+COPY entrypoint.sh /mosquitto/entrypoint.sh
+RUN sed -i 's/\r$//' /mosquitto/entrypoint.sh && chmod +x /mosquitto/entrypoint.sh
 
-# Expose MQTT ports
-EXPOSE 1883
-EXPOSE 8883
+EXPOSE 1883 8883
 
-# Set the user and entrypoint
-USER mosquitto
-ENTRYPOINT ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+ENTRYPOINT ["/bin/sh", "/mosquitto/entrypoint.sh"]
