@@ -39,6 +39,11 @@ jobs:
           SPRING_HOST_HTTP: user-device-service
           FRONTEND_HOST_PORT: 5173
         run: docker compose --profile apps up -d --wait user-device-service frontend
+      
+      - name: Dump Frontend Logs on Failure
+        if: failure()
+        working-directory: ./
+        run: docker compose --profile apps logs frontend
 
       - name: Install dependencies
         run: npm ci
