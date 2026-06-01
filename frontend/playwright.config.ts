@@ -8,7 +8,7 @@ import { defineConfig, devices } from '@playwright/test';
 // import path from 'path';
 // dotenv.config({ path: path.resolve(__dirname, '.env') });
 
-export const STORAGE_STATE = 'playwright/.auth/user.json';
+export const STORAGE_STATE = 'user.json';
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
