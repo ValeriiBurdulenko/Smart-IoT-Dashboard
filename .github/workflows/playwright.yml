@@ -61,3 +61,8 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+      
+      - name: Dump Keycloak Logs on Failure
+        if: failure()
+        working-directory: ./
+        run: docker compose --profile apps logs--tails=100 keycloak
