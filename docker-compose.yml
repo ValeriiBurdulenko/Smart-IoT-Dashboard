@@ -209,6 +209,8 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
 
+      KC_HEALTH_ENABLED: "true"
+
       # Public hostname for Keycloak redirects / token issuer host. KEYCLOAK_PUBLIC_HOST → IOT_PUBLIC_HOST → Laptop_IP
       KC_HOSTNAME: ${KEYCLOAK_PUBLIC_HOST:-${IOT_PUBLIC_HOST:-${Laptop_IP}}}
       KC_HOSTNAME_STRICT: "false"
@@ -236,14 +238,11 @@ services:
     networks:
       - iot-network
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e \"GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n\" >&3;grep \"200 OK\" <&3",
-        ]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000;echo -e \"GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n\" >&3;grep \"200 OK\" <&3"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 90s
 
   mqtt-kafka-bridge:
     build:

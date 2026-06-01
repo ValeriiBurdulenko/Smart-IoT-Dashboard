@@ -25,6 +25,7 @@ jobs:
         env:
           IOT_PUBLIC_HOST: localhost
           SPRING_HOST_HTTP: user-device-service
+          FRONTEND_HOST_PORT: 5173
         run: |
           docker compose --profile apps up -d --wait
           docker compose --profile apps ps
