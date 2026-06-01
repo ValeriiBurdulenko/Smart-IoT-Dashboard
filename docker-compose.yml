@@ -13,25 +13,30 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - iot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U username -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   influxdb:
     image: influxdb:2.7-alpine
     container_name: iot_influxdb
     restart: always
     ports:
-        - "8086:8086"
+      - "8086:8086"
     environment:
-        DOCKER_INFLUXDB_INIT_MODE: setup
-        DOCKER_INFLUXDB_INIT_USERNAME: admin
-        DOCKER_INFLUXDB_INIT_PASSWORD: password
-        DOCKER_INFLUXDB_INIT_ORG: smart-iot-dashboard
-        DOCKER_INFLUXDB_INIT_BUCKET: iot-data
-        DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: my-super-secret-auth-token
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: password
+      DOCKER_INFLUXDB_INIT_ORG: smart-iot-dashboard
+      DOCKER_INFLUXDB_INIT_BUCKET: iot-data
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: my-super-secret-auth-token
     volumes:
-        - influxdb_data:/var/lib/influxdb2
-        - influxdb_config:/etc/influxdb2
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
     networks:
-        - iot-network
+      - iot-network
 
   grafana:
     image: grafana/grafana:latest
@@ -47,7 +52,7 @@ services:
       - iot-network
     volumes:
       - grafana_data:/var/lib/grafana
-  
+
   load-tester:
     build:
       context: ./simulators
@@ -96,7 +101,7 @@ services:
       - kafka_data:/var/lib/kafka/data
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
 
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_INTERNAL:SASL_PLAINTEXT
       # External SASL: LAN/browser host. Override order: KAFKA_ADVERTISED_HOST → IOT_PUBLIC_HOST → Laptop_IP (legacy).
@@ -119,7 +124,7 @@ services:
       KAFKA_LOG4J_ROOT_LOGLEVEL: INFO
       KAFKA_LOG4J_LOGGERS: "kafka.authorizer.logger=INFO,state.change.logger=INFO"
     networks:
-      - iot-network  
+      - iot-network
     healthcheck:
       test:
         - "CMD-SHELL"
@@ -174,7 +179,7 @@ services:
     networks:
       - iot-network
     restart: unless-stopped
-  
+
   rabbitmq:
     image: rabbitmq:3.12-management
     container_name: iot_rabbitmq
@@ -217,7 +222,8 @@ services:
     ports:
       - "8180:8080"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       # Settings import (Realm)
       - ./docker/keycloak/realms/realm-export.json:/opt/keycloak/data/import/realm.json
@@ -229,7 +235,16 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - iot-network
-  
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e \"GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n\" >&3;grep \"200 OK\" <&3",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   mqtt-kafka-bridge:
     build:
       context: ./mqtt-kafka-bridge
@@ -245,8 +260,8 @@ services:
     environment:
       # Settings MQTT
       MQTT_BROKER_HOST: mosquitto
-      MQTT_BROKER_PORT_TLS: 8883          # Port TLS
-      MQTT_BROKER_PORT: 1883              # Port without TLS (not used here)
+      MQTT_BROKER_PORT_TLS: 8883 # Port TLS
+      MQTT_BROKER_PORT: 1883 # Port without TLS (not used here)
       MQTT_USE_TLS: "true"
       MQTT_CA_CERT: "/app/ca.crt"
       MQTT_TOPIC_IN: "iot/telemetry/+"
@@ -257,13 +272,13 @@ services:
       # Settings Kafka
       KAFKA_BROKER: kafka:29092
       KAFKA_TOPIC_OUT: iot-telemetry-raw
-      
+
       # SASL Auth для Kafka
       KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
       KAFKA_SASL_MECHANISM: PLAIN
       KAFKA_SASL_USERNAME: mqtt_kafka_bridge_user
       KAFKA_SASL_PASSWORD: bridge-secret
-      
+
       # Performance
       MAX_QUEUE_SIZE: 10000
       HEALTH_PORT: 8080
@@ -290,7 +305,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:80}
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_started
       kafka:
@@ -302,9 +317,19 @@ services:
       influxdb:
         condition: service_started
       keycloak:
-        condition: service_started
+        condition: service_healthy
     networks:
       - iot-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:8088/actuator/health > /dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     restart: unless-stopped
 
   frontend:
@@ -321,9 +346,15 @@ services:
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:80"
     depends_on:
-      - user-device-service
+      user-device-service:
+        condition: service_healthy
     networks:
       - iot-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80 > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   flink-jobmanager:
