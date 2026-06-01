@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+test.use({ storageState: {cookies: [], origins: []} });
+
 test('App should load and redirect to Keycloak login', async ({ page }) => {
   await page.goto('/');
 

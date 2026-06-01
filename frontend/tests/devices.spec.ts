@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('Should display devices list', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/devices');
 
   await expect(page.getByRole('heading', { name: 'Devices' })).toBeVisible();
   
