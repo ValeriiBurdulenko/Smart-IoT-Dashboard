@@ -47,3 +47,5 @@ certs/*.key
 !data-processing-service/src/main/resources/flink.properties
 credentials_*.enc
 state_*.json
+
+!theme.properties
