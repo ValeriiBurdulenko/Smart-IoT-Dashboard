@@ -8,6 +8,7 @@ import { defineConfig, devices } from '@playwright/test';
 // import path from 'path';
 // dotenv.config({ path: path.resolve(__dirname, '.env') });
 
+export const STORAGE_STATE = path.join(__dirname, '.auth/user.json');
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
@@ -43,7 +44,7 @@ export default defineConfig({
       name: 'chromium',
       use: { 
         ...devices['Desktop Chrome'],
-        storageState: 'playwright/.auth/user.json',
+        storageState: STORAGE_STATE,
         ignoreHTTPSErrors: true,
       },
       dependencies: ['setup'],
@@ -51,12 +52,20 @@ export default defineConfig({
 
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      use: { 
+        ...devices['Desktop Firefox'],
+        storageState: STORAGE_STATE,
+      },
+      dependencies: ['setup'],
     },
 
     {
       name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
+      use: { 
+        ...devices['Desktop Safari'],
+        storageState: STORAGE_STATE,
+      },
+      dependencies: ['setup'],
     },
 
     /* Test against mobile viewports. */
