@@ -20,15 +20,25 @@ jobs:
         with:
           node-version: 20
 
-      - name: Start Full Stack via Docker Compose
+      - name: Step 1 - Start Core Infrastructure
+        working-directory: ./
+        env:
+          IOT_PUBLIC_HOST: localhost
+        run: docker compose --profile apps up -d --wait postgres keycloak kafka zookeeper influxdb redis mosquitto rabbitmq flink-jobmanager flink-taskmanager
+
+      - name: Step 2 - Run Init Scripts
+        working-directory: ./
+        env:
+          IOT_PUBLIC_HOST: localhost
+        run: docker compose --profile apps --profile flink-submit up kafka-setup flink-submit
+
+      - name: Step 3 - Start Application Layer
         working-directory: ./
         env:
           IOT_PUBLIC_HOST: localhost
           SPRING_HOST_HTTP: user-device-service
           FRONTEND_HOST_PORT: 5173
-        run: |
-          docker compose --profile apps up -d --wait
-          docker compose --profile apps ps
+        run: docker compose --profile apps up -d --wait user-device-service frontend
 
       - name: Install dependencies
         run: npm ci
